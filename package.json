@@ -1,0 +1,29 @@
+{
+  "name": "ruifeng-data-cleaning",
+  "version": "2.0.0",
+  "description": "睿锋智链汽车配件数据清洗技能 — 工厂编号解析、OE交叉验证、多源查询、参数回写",
+  "keywords": [
+    "auto-parts",
+    "data-cleaning",
+    "oe-cross-reference",
+    "bearing",
+    "claude-code-skill",
+    "hermes-skill"
+  ],
+  "author": "stoic16",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stoic16/ruifeng-data-cleaning"
+  },
+  "files": [
+    "SKILL.md",
+    "references/",
+    "scripts/",
+    "modules/",
+    "install.js"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  }
+}
