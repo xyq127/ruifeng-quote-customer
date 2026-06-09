@@ -535,8 +535,6 @@ https://www.17vin.com/modellist/{OE}/{group_id}.html
 2. **OEM 号匹配工厂表**：建立 OEM 索引（归一化前 8-10 位），精确+模糊匹配
 3. **品牌车型模糊匹配**（建议性）：从车型描述提取品牌关键词匹配，需人工核实
 
-已知 OE→RAT 映射表见 `references/factory-table-cross-reference.md`。
-
 ### 关联编号 OE 校验（Excel 批量验证）
 
 对 Excel 中的 OE 和关联编号列批量校验，归一化去横杠空格后比对：
