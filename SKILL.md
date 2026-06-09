@@ -5,13 +5,13 @@ version: 2.0.0
 author: Hermes Agent
 category: data-cleaning
 changelog: |
+  2.0.1 (2026-06-09): 模块目录清理：删除冗余的 ruifeng-backend-api 模块（功能已集成到 CLI）；合并 ruifeng-taianlian-browser 和 ruifeng-tecdoc-browser 为统一的 ruifeng-tecdoc-search；所有模块 description 改为触发条件格式
   2.0.0 (2026-06-04): 移除 spareto 品牌分流；新增"车型数据清洗（行话翻译）"核心章节；统一查询路径为泰安联→17vin→电商平台
   1.0.0: 初始版本
 depends_on:
   - ruifeng-factory-number-parser
   - ruifeng-17vin-epc-query
-  - ruifeng-taianlian-browser
-  - ruifeng-backend-api
+  - ruifeng-tecdoc-search
   - cloakbrowser-cli
   - cli-anything-platform-service
 ---
