@@ -1,10 +1,11 @@
 ---
 name: ruifeng-data-cleaning
 description: 睿锋智链数据清洗主流程 — 综合工厂编号解析、17vin EPC 查询、泰安联浏览器查询、睿锋后台 API 查询，对单个产品进行全维度交叉验证，输出清洗报告。数据源优先级: 泰安联≈17vin > 电商平台。在数据源查询结果中，优先选取主机大厂OE(丰田/本田/日产/大众/奔驰/宝马/现代/福特等)和关联编号大厂(SKF/NSK/FAG/冠盛/盖茨等)。
-version: 2.0.1
+version: 2.0.3
 author: Hermes Agent
 category: data-cleaning
 changelog: |
+  2.0.3 (2026-06-09): CLI 新增 config login/oe-query；新增一代轴承 DAC 编码格式关键规则；修正安装路径
   2.0.2 (2026-06-09): 大幅精简 SKILL.md，移除历史调试笔记、重复内容、冗余代码示例，从 916 行压缩至 ~350 行
   2.0.1 (2026-06-09): 模块目录清理；合并泰安联和 TecDoc 为统一 tecdoc-search
   2.0.0 (2026-06-04): 移除 spareto 品牌分流；新增"车型数据清洗（行话翻译）"核心章节
@@ -32,10 +33,13 @@ depends_on:
 | 后台产品详情 | `data-clean backend-detail --product-id <ID>` | 获取关联编号和参数 |
 | 17vin EPC 查询 | `data-clean epc-query --keyword <车型>` | 17vin API 车型搜索/EPC 目录 |
 | 泰安联搜索 | `data-clean taianlian-search --query <编号>` | 通过 Chrome CDP 搜索 TecDoc |
+| 一站式OE查询 | `data-clean oe-query --query <尺寸/DAC编码/OE>` | 整合泰安联+17vin，自动识别输入 |
 | OE 交叉验证 | `data-clean cross-validate --file <Excel>` | 批量校验关联编号 (A/B/C 分类) |
 | Excel 处理 | `data-clean excel-process read/images/merge` | Excel 读写/图片提取/跨表合并 |
 
-**安装**: `pip install -e ~/web-project/backend-code-repo/agent-harness[data-clean]`
+**认证**: `config login` 登录获取 token（密码可从 PLATFORM_PASSWORD 环境变量或交互式输入）
+
+**安装**: `pip install -e ~/web-project/cli-platform-service`
 
 ## 何时使用
 
@@ -82,7 +86,8 @@ depends_on:
 │  └─ 二代/三代轮毂单元：RAH → 需后台获取参数                     │
 │                                                              │
 │  步骤1：泰安联 TecDoc 查询（优先级最高）                         │
-│  ├─ 一代轴承：用8位核心编号搜索                                 │
+│  ├─ 一代轴承：用 DAC 编码 {d}{D}00{B} 搜索（如 45x84x45→45840045）  │
+│  ├─ 可一步搞定：`data-clean oe-query --query 45x84x45`             │
 │  └─ 轮毂单元：用 OE 号或车型+配件名称搜索                       │
 │                                                              │
 │  步骤2：17vin EPC 查询（泰安联未命中的产品）                     │
@@ -104,9 +109,8 @@ depends_on:
 1. **Excel 关联编号校验** — `data-clean cross-validate --file 文件.xlsx --check-structure`
    - 输出三类：A) DAC格式轴承型号、B) 格式差异(归一化匹配)、C) 真正缺失
    - 只处理 C 类；同时做结构性检查
-2. **泰安联 CDP 搜索**（核心验证渠道）— `data-clean taianlian-search --query <8位数字/OE号>`
-   - 查完立即做安装位置交叉验证（泰安联安装位置 vs Excel名称列）
-3. **17vin 网页端 EPC**（泰安联未命中的产品）— `data-clean epc-query --keyword <车型>`
+2. **泰安联 CDP 搜索** — 一代轴承用 DAC 编码 `{d}{D}00{B}` 搜索，或直接用 `data-clean oe-query --query <尺寸>` 一站式完成
+3. **17vin EPC**（泰安联未命中的产品）— `data-clean oe-query --query <OE> --skip-tecalliance` 或 `data-clean epc-query --keyword <车型>`
 4. **睿锋后台 API 查询** — `data-clean backend-search --keyword <关键词> --with-details`
 5. **电商平台搜索**（以上均无结果时）
 6. **标记待确认** — 直接问工厂获取 OE 号，或标记"待确认"暂存
@@ -242,7 +246,17 @@ Excel 批量校验时分类：
 ### 9. Excel 列语义识别
 不要仅凭表头判断列含义。列名写"OE"但内容实际是关联编号列表、真正的 OE 号在"工厂型号"列的情况经常出现。根据列内容的格式特征识别：OE 号多为单一编号，关联编号列常含逗号分隔的多个编号。
 
-### 10. 电商平台验证规则
+### 11. 一代轴承泰安联 DAC 编码格式
+
+一代轴承在泰安联上搜索时，需用 DAC 编码格式 `{内径}{外径}00{高}`，而非空格分隔的尺寸。
+
+- 格式：`{d:02d}{D:02d}00{B:02d}`
+- 例：45×84×45 → `45840045`
+- 例：48×86×42 → `48860042`
+
+也可直接用 `data-clean oe-query --query 45x84x45` 自动编码并搜索。
+
+### 12. 电商平台验证规则
 必须至少 3 家不同店铺列出相同的 OE 号才可采纳。优先采信实物图 OE 钢印。多店铺结果冲突时，标注"多源不一致，待工厂确认"。
 
 ## 错误处理
