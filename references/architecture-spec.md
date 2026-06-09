@@ -9,60 +9,60 @@
 │                         用户 / Hermes Agent                          │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
-                ┌──────────────┼──────────────┐
-                │              │              │
-                ▼              ▼              ▼
-┌───────────────────┐ ┌──────────────┐ ┌──────────────────────┐
-│ ruifeng-data-     │ │ cloakbrowser │ │ cli-anything-        │
-│ cleaning skill    │ │ -cli skill   │ │ platform-service CLI │
-│ (Hermes 主技能)   │ │ (参考文档)    │ │ (Python CLI 工具)     │
-├───────────────────┤ ├──────────────┤ ├──────────────────────┤
-│ 工作流编排        │ │ CDP 部署指南  │ │ data-clean 命令组    │
-│ 数据源选择        │ │ Python API   │ │  - parse             │
-│ 错误处理策略      │ │ Profile 管理  │ │  - backend-search    │
-│ CLI 命令映射      │ │              │ │  - epc-query         │
-└────────┬──────────┘ └──────────────┘ │  - taianlian-search  │
-         │                             │  - cross-validate    │
-         │ 引用                         │  - excel-process     │
-         └─────────────────────────────►│                      │
-                                       └──────────┬───────────┘
-                                                  │
-                    ┌─────────────────────────────┼─────────────────┐
-                    │                             │                 │
-                    ▼                             ▼                 ▼
-┌───────────────────────┐    ┌───────────────────────┐    ┌─────────────────┐
-│  CloakBrowser CDP     │    │  外部 API              │    │  文件系统        │
-│  Server (Docker)      │    │                       │    │                 │
-├───────────────────────┤    ├───────────────────────┤    ├─────────────────┤
-│ localhost:9222        │    │ rfscm.com REST API    │    │ Excel .xlsx/.xls │
-│ 隐形 Chromium         │    │ api.17vin.com:8080    │    │ CSV 输出         │
-│ 58 C++ 隐身补丁       │    │ 电商平台 (淘宝/京东/1688) │    │ Profile 持久化   │
-│ 随机指纹 + 人化交互    │    │ tecalliance.cn (CDP)  │    │                  │
-└───────────────────────┘    └───────────────────────┘    └─────────────────┘
+                ┌──────────────┴──────────────┐
+                │                              │
+                ▼                              ▼
+┌──────────────────────────────┐ ┌──────────────────────────────┐
+│ ruifeng-data-cleaning skill  │ │ cli-anything-platform-        │
+│ (Hermes 主技能)              │ │ service CLI                   │
+├──────────────────────────────┤ │ (Python CLI 工具)             │
+│ 工作流编排 / 数据源选择       │ ├──────────────────────────────┤
+│ 错误处理策略 / CLI 命令映射   │ │ data-clean 命令组             │
+└────────┬─────────────────────┘ │  - parse                     │
+         │ 引用                   │  - backend-search            │
+         └──────────────────────►│  - epc-query                 │
+                                 │  - taianlian-search          │
+                                 │  - cross-validate            │
+                                 │  - excel-process             │
+                                 └──────────┬───────────────────┘
+                                            │
+                    ┌───────────────────────┼───────────────────┐
+                    │                       │                   │
+                    ▼                       ▼                   ▼
+┌─────────────────────────┐    ┌───────────────────────┐    ┌─────────────────┐
+│  Chrome CDP 浏览器       │    │  外部 API              │    │  文件系统        │
+│  (Windows 调试端口)      │    │                       │    │                 │
+├─────────────────────────┤    ├───────────────────────┤    ├─────────────────┤
+│ localhost:9250           │    │ rfscm.com REST API    │    │ Excel .xlsx/.xls │
+│ --user-data-dir 持久化   │    │ api.17vin.com:8080    │    │ CSV 输出         │
+│ --remote-allow-origins=* │    │ 电商平台 (淘宝/京东/1688) │    │ Profile 持久化   │
+│ 无头 / 有头模式           │    │ tecalliance.cn (CDP)  │    │                  │
+└─────────────────────────┘    └───────────────────────┘    └─────────────────┘
 ```
 
 ## 2. 组件说明
 
-### 2.1 CloakBrowser CDP Server
+### 2.1 Chrome CDP 浏览器
 
-**职责**: 提供隐形浏览器实例，替代裸 Chrome 进行反检测浏览器自动化。
+**职责**: 通过 Chrome 远程调试协议（CDP）操作浏览器页面，执行泰安联/TecDoc 搜索、17vin EPC 网页端查询等需要浏览器环境的操作。
 
-**部署**: WSL2 Docker，端口 9222
+**部署**: 用户 Windows 端启动 Chrome 调试模式，端口 9250
 
-**关键能力**:
-- 58 个 C++ 源码级隐身补丁 (navigator.webdriver=false, TLS 指纹=真实 Chrome)
-- 每连接独立随机指纹，seed 固定可复现
-- 人化交互: Bezier 鼠标、变速键盘、物理滚动
-- 持久化 profile: 登录态跨会话保存
+**关键配置**:
+- `--remote-debugging-port=9250` — 固定调试端口
+- `--remote-allow-origins=*` — Chrome 148+ 必需，否则 WebSocket 握手返回 403
+- `--user-data-dir=C:\ChromeDebugProfile` — 持久化 profile，保存登录态
+- `--no-first-run --no-default-browser-check` — 首次启动免配置
 
-**配置示例**:
-```bash
-docker run -d --name cloak -p 9222:9222 \
-  -v ~/.cloakbrowser/profiles:/profiles \
-  cloakhq/cloakbrowser cloakserve \
-  --profile-dir=/profiles \
-  --fingerprint-seed=ruifeng-data-cleaning \
-  --timezone=Asia/Shanghai --locale=zh-CN
+**启动命令**（Windows PowerShell）:
+```powershell
+Start-Process 'C:\Program Files\Google\Chrome\Application\chrome.exe' -ArgumentList @(
+    '--remote-debugging-port=9250',
+    '--remote-allow-origins=*',
+    '--user-data-dir=C:\ChromeDebugProfile',
+    '--no-first-run',
+    '--no-default-browser-check'
+)
 ```
 
 ### 2.2 cli-anything-platform-service (data-clean 命令组)
@@ -90,19 +90,12 @@ data-clean
 
 **位置**: `~/.hermes/skills/ruifeng-data-cleaning/SKILL.md`
 
-**依赖**: cloakbrowser-cli, cli-anything-platform-service, 以及 4 个原有模块
+**依赖**: cli-anything-platform-service, 以及 4 个原有模块
 
-### 2.4 cloakbrowser-cli Skill
+### 2.4 cloakbrowser-cli Skill（外部参考）
 
-**职责**: CloakBrowser 使用参考文档，仿 playwright-cli 模式。
-
-**位置**: `~/.hermes/skills/browser-automation/cloakbrowser-cli/`
-
-**文件**:
-- `SKILL.md` — 主参考
-- `references/cdp-server-setup.md` — 部署指南
-- `references/python-api.md` — Python API
-- `references/persistent-profiles.md` — Profile 管理
+CloakBrowser 是一个隐形 Chromium 浏览器（58 个 C++ 隐身补丁），当前暂未在生产流程中使用。
+参考文档位于 `~/.hermes/skills/browser-automation/cloakbrowser-cli/`。
 
 ### 2.5 外部数据源
 
@@ -158,44 +151,40 @@ Excel 文件 (工厂编号 + 车型 + 关联编号)
 
 ## 4. 浏览器架构
 
-### 4.1 迁移路径
+Chrome 远程调试协议（CDP）是浏览器自动化操作的唯一入口。所有需要浏览器环境的查询（泰安联 TecDoc 搜索、17vin EPC 网页端导航）均通过 Windows Chrome 调试端口实现。
+
+### 4.1 Chrome CDP 连接方式
 
 ```
-Before (当前):                       After (目标):
-Windows Chrome                      CloakBrowser CDP Server
---remote-debugging-port=9250        Docker on WSL2, port 9222
---user-data-dir=C:\ChromeDebug      --profile-dir=/profiles (持久化)
-                                    --fingerprint-seed=... (隐身)
-                                    
-Hermes browser_* tools              Hermes browser_* tools
-  → http://127.0.0.1:9250             → http://localhost:9222
-  
-npx agent-browser                   npx agent-browser
-  --cdp ws://127.0.0.1:9250/...      --cdp ws://localhost:9222/...
+Windows Chrome (Windows 端)
+  --remote-debugging-port=9250
+  --user-data-dir=C:\ChromeDebugProfile
+  --remote-allow-origins=*
+
+Hermes browser_* tools / Python 脚本
+  → http://127.0.0.1:9250
+  → ws://127.0.0.1:9250/... (WebSocket)
 ```
 
 ### 4.2 登录工作流
 
 ```
 首次使用 (一次性):
-  1. 启动 CloakBrowser CDP Server (有头模式)
-  2. Hermes browser_navigate 到 tecalliance.cn/cn/login
+  1. 启动 Windows Chrome 调试模式 (端口 9250)
+  2. CDP 导航到目标站点 (tecalliance.cn / www.17vin.com)
   3. 用户手动输入账号密码 + 完成验证码
-  4. 登录态自动保存到持久化 profile
+  4. 登录态保存在 --user-data-dir 指向的 profile
 
 后续使用:
-  1. 启动 CloakBrowser CDP Server (可复用已有 profile)
-  2. 直接操作，无需登录
-  3. 隐身补丁避免触发新的验证码
+  1. 重启 Chrome 时指定同一 --user-data-dir
+  2. 登录态自动恢复，直接操作
 ```
 
-### 4.3 降级策略
+### 4.3 异常处理
 
 | 场景 | 策略 |
 |------|------|
-| Docker 不可用 | `python -m cloakbrowser install` 安装原生二进制 |
-| CloakBrowser 不可用 | 回退 Windows Chrome CDP (原方案) |
-| 验证码仍触发 | 提示用户手动完成，检查 profile 是否过期 |
+| 验证码触发 | 提示用户手动完成，检查 Cookie/登录态是否过期 |
 | CDP 超时 | 重试 3 次，间隔 5s，仍失败则跳过该产品 |
 
 ## 5. 配置参考
@@ -204,17 +193,15 @@ npx agent-browser                   npx agent-browser
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `CLOAKBROWSER_CDP_URL` | `http://localhost:9222` | CloakBrowser CDP 端点 |
 | `PLATFORM_BASE_URL` | `https://rfscm.com` | 睿锋后台 API |
 | `PLATFORM_TOKEN` | — | 后台 API Bearer Token |
 | `PLATFORM_ENV` | — | 环境 (test/prod) |
-| `CLOAKBROWSER_CACHE_DIR` | `~/.cloakbrowser` | 二进制缓存目录 |
 
 ### 5.2 Hermes Config (~/.hermes/config.yaml)
 
 ```yaml
 browser:
-  cdp_url: http://localhost:9222   # CloakBrowser CDP Server
+  cdp_url: http://127.0.0.1:9250   # Chrome CDP (Windows 调试端口)
 ```
 
 ### 5.3 CLI Config (~/.cli-anything-platform-service/config.json)
@@ -237,7 +224,7 @@ browser:
 | 后台 API 404 | 产品未收录，标记"需录入" |
 | 17vin API 503 | 标记"API 暂时不可用"，后续补查 |
 | Excel 读取失败 | 检查文件格式 (.xls→xlrd, .xlsx→openpyxl)，指定正确 Python 解释器 |
-| CDP 不可达 | 检查 Docker 容器状态，提示启动命令 |
+| CDP 不可达 | 检查 Windows Chrome 是否运行在端口 9250，提示启动命令 |
 
 ### 6.2 Skill 层面
 
@@ -251,8 +238,6 @@ browser:
 
 - **Redis 缓存**: 缓存 17vin API 结果 (3 分钱/次)，避免重复查询
 - **并行批处理**: 非浏览器操作 (parse/backend-search/epc-api) 可并行
-- **CloakBrowser 原生部署**: 跳过 Docker，直接用 `python -m cloakbrowser install`
-- **自动 CAPTCHA**: 如 CloakBrowser 未来支持，可完全自动化登录
 - **Excel 模板**: 标准化输入/输出格式，一键清洗
 - **Web Dashboard**: 可视化清洗进度和结果
 
@@ -260,10 +245,6 @@ browser:
 
 | 文件 | 位置 | 类型 |
 |------|------|------|
-| CloakBrowser SKILL.md | `~/.hermes/skills/browser-automation/cloakbrowser-cli/SKILL.md` | Skill (NEW) |
-| CDP Setup Guide | `~/.hermes/skills/browser-automation/cloakbrowser-cli/references/cdp-server-setup.md` | Reference (NEW) |
-| Python API Guide | `~/.hermes/skills/browser-automation/cloakbrowser-cli/references/python-api.md` | Reference (NEW) |
-| Profile Guide | `~/.hermes/skills/browser-automation/cloakbrowser-cli/references/persistent-profiles.md` | Reference (NEW) |
 | data_clean __init__ | `web-project/backend-code-repo/agent-harness/cli_anything/platform_service/core/data_clean/__init__.py` | Code (NEW) |
 | factory_parser | `.../data_clean/factory_parser.py` | Code (NEW) |
 | backend_api | `.../data_clean/backend_api.py` | Code (NEW) |

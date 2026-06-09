@@ -12,7 +12,6 @@ depends_on:
   - ruifeng-factory-number-parser
   - ruifeng-17vin-epc-query
   - ruifeng-tecdoc-search
-  - cloakbrowser-cli
   - cli-anything-platform-service
 ---
 
@@ -32,7 +31,7 @@ depends_on:
 | 后台产品搜索 | `data-clean backend-search --keyword <关键词>` | 查询 rfscm.com 产品库 (queryType=ENCODE) |
 | 后台产品详情 | `data-clean backend-detail --product-id <ID>` | 获取关联编号和参数 |
 | 17vin EPC 查询 | `data-clean epc-query --keyword <车型>` | 17vin API 车型搜索/EPC 目录 |
-| 泰安联搜索 | `data-clean taianlian-search --query <编号>` | 通过 CloakBrowser CDP 搜索 TecDoc |
+| 泰安联搜索 | `data-clean taianlian-search --query <编号>` | 通过 Chrome CDP 搜索 TecDoc |
 | OE 交叉验证 | `data-clean cross-validate --file <Excel>` | 批量校验关联编号 (A/B/C 分类) |
 | Excel 处理 | `data-clean excel-process read/images/merge` | Excel 读写/图片提取/跨表合并 |
 
@@ -131,7 +130,7 @@ POST https://rfscm.com/api/oauth/login/dologin?mobile=13999999999&password=99999
 │  - 详见下方 ⚡"车型数据清洗（行话翻译）"核心章节             │
 │                                                             │
 │  第一步：泰安联 TecDoc 查询（优先级最高）                      │
-│  - 通过 CDP 连接已登录 CloakBrowser                           │
+│  - 通过 CDP 连接已登录的 Chrome（端口 9250）                        │
 │  - 一代轴承：用工厂编号解析出的8位核心编号搜索                  │
 │  - 轮毂单元：用 OE 号或车型+配件名称搜索                       │
 │  - 提取 OE 号、适配车型、参数、图片                            │
@@ -472,7 +471,7 @@ subprocess.run(["/home/linuxbrew/.linuxbrew/bin/python3", "-c", script], capture
    ```bash
    cli-anything-platform-service data-clean epc-query --keyword <车型>  # API 方式
    ```
-   - 用户在 CloakBrowser 中登录 17vin（首次），后续持久化 profile 复用
+   - 用户在 Chrome 中登录 17vin（首次），后续复用 login state
    - CDP 连接操作网页端 EPC 查询
    - 查看关联编号中是否有 SKF、NSK、FAG 等大厂 OEM
    - ✅ 适用于所有品牌（网页端无 API 限制）
@@ -608,7 +607,7 @@ found_normalized = oe_normalized in related_normalized
 | 17vin SFH API (`openapi.sfh123.cn`) | 新 API，HMAC-SHA256 签名鉴权；`/vin/query` 可用，`/parts/query` 需 `vin`/`vehicleIds` 参数（不支持 OEM 反向查询） |
 | 17vin Section 4 API（4001/4004/40031）| ✅ 实际可用！见 `references/17vin-section4-api.md`（之前误报503是因为代理环境问题） |
 | 泰安联无匹配结果 | 可能是参数编码问题或 OE 号不正确，标记异常，需人工确认 |
-| CDP 端点不通 | 检查调试 Chrome 是否运行，端口 9222 是否监听 |
+| CDP 端点不通 | 检查调试 Chrome 是否运行，端口 9250 是否监听 |
 
 ## ⚠️ 已知坑（Pitfalls）
 
@@ -638,40 +637,6 @@ found_normalized = oe_normalized in related_normalized
 ### 28. 13999999999 就是管理员账号（2026-05-15 确认）
 
 之前误认为是"运营账号"导致 API 无权限。实际上该账号就是管理员，API 返回空数据是因为**搜索参数错误**，不是权限问题。
-
-### 10. 泰安联搜索方式（CloakBrowser CDP Server）
-
-**方案变更（2026-05-28）**：从 Windows Chrome CDP 改为 CloakBrowser CDP Server（隐形 Chromium，58 个 C++ 隐身补丁）。
-
-**优势**：
-- 隐身补丁阻止验证码出现（30/30 检测通过，reCAPTCHA v3 得分 0.9）
-- WSL2 Docker 内闭环运行，无需跨 OS 依赖
-- 持久化 profile 保存登录态，一次登录持续复用
-- 每连接独立指纹，反检测
-
-**启动 CloakBrowser CDP Server**：
-```bash
-docker run -d --name cloak -p 9222:9222 \
-  -v ~/.cloakbrowser/profiles/taianlian:/profiles \
-  cloakhq/cloakbrowser cloakserve \
-  --profile-dir=/profiles \
-  --fingerprint-seed=taianlian-fixed \
-  --timezone=Asia/Shanghai \
-  --locale=zh-CN
-```
-
-**验证连接**：
-```bash
-curl http://localhost:9222/json/version
-```
-
-**Hermes 连接**：`browser.cdp_url: http://localhost:9222`（在 `~/.hermes/config.yaml` 中配置）
-
-**注意事项**：
-- 首次使用需在 CloakBrowser 中手动登录泰安联（验证码），后续持久化 profile 复用登录态
-- CloakBrowser 不解决验证码，但通过隐身补丁**阻止验证码出现**
-- 如仍触发验证码，CLI 会提示用户手动完成
-- 详见 `cloakbrowser-cli` skill 的 CDP Server 部署指南
 
 ### 11. 批量查询必须顺序执行，不可并行（2026-06 修正）
 
@@ -907,7 +872,7 @@ ws = websocket.create_connection(url, timeout=10, http_proxy_host="", http_proxy
 
 ### 34. CDP WebSocket 连接浏览器（2026-05-28）
 
-通过 CloakBrowser/Windows Chrome CDP 调试端口连接时：
+通过 Chrome CDP 调试端口连接时：
 
 **浏览器端**（Windows PowerShell）：
 ```powershell
@@ -928,7 +893,6 @@ ws = websocket.create_connection(page_ws_url, timeout=10, http_proxy_host="", ht
 
 注意：
 - `--remote-allow-origins=*` 在 Chrome 148+ 是必需的，否则 WebSocket 握手返回 403
-- CloakBrowser Docker 版可能在端口 9222，但 Windows Chrome 也在 9222 时会冲突
 - CDP 连续查询 400+ 次后连接可能断开（Chrome 崩溃或 session 超时），需要重新连接
 - 泰安联会话可能因大量查询触发验证页面，需用户重新登录
 

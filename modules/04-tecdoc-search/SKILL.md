@@ -22,10 +22,10 @@ category: data-cleaning
 数据清洗流程已集成到 `cli-anything-platform-service` CLI：
 
 ```bash
-# 泰安联搜索（通过 CloakBrowser CDP）
+# 泰安联搜索（通过 Chrome CDP）
 data-clean taianlian-search --query <工厂编号>
 
-# TecDoc 通用搜索（通过 CloakBrowser CDP）
+# TecDoc 通用搜索（通过 Chrome CDP）
 data-clean tecdoc-search --query <OE号>
 ```
 
@@ -34,17 +34,17 @@ data-clean tecdoc-search --query <OE号>
 ## 登录方式
 
 - **用户先登录**：Agent 不处理登录页面的验证码或认证流程
-- 登录态通过 CloakBrowser CDP 持久化 profile 保存，后续使用无需重复登录
+- 登录态通过 Chrome `--user-data-dir` 持久化保存，后续使用无需重复登录
 
 ### 首次使用（一次性）
-1. 启动 CloakBrowser CDP Server（有头模式）
+1. 启动 Windows Chrome 调试模式（端口 9250）
 2. CDP 导航到对应站点（泰安联 或 `tecalliance.cn`）
 3. 用户手动输入账号密码 + 完成验证码
-4. 登录态自动保存到持久化 profile
+4. 登录态自动保存到 `--user-data-dir` 指定的 profile
 
 ### 后续使用
-1. 启动 CloakBrowser CDP Server（可复用已有 profile）
-2. 直接操作，无需登录
+1. 重启 Chrome 时指定同一 `--user-data-dir`
+2. 登录态自动恢复，直接操作
 
 ## 数据提取目标
 
@@ -66,16 +66,15 @@ data-clean tecdoc-search --query <OE号>
 3. **反爬机制**：操作间隔保持 1-2 秒，避免频繁请求触发封禁
 4. **图片比对由用户判断**：截图后发给用户肉眼判断
 5. **搜索精度**：TecDoc 搜索可能需要精确的 OE 号格式（带/不带横杠都试一下）
-6. **CDP 不可达**：检查 Docker 容器状态，提示启动命令 `docker start cloak`
+6. **CDP 不可达**：检查 Windows Chrome 是否运行在端口 9250
 
-## 降级策略
+## 异常处理
 
 | 场景 | 策略 |
 |------|------|
-| CloakBrowser 不可用 | 回退 Windows Chrome CDP（原方案 port 9250） |
-| 验证码触发 | 提示用户手动完成，检查 profile 是否过期 |
+| 验证码触发 | 提示用户手动完成，检查 Cookie/登录态是否过期 |
 | CDP 超时 | 重试 3 次，间隔 5s，仍失败则跳过该产品 |
-| 泰安联+17vin 均无结果 | 进入电商平台搜索兜底 |
+| Chrome 未启动 | 提示用户在 Windows 端启动 Chrome 调试模式（端口 9250） |
 
 ## 与数据清洗流程的关系
 
