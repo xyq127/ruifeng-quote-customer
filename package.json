@@ -21,6 +21,7 @@
     "references/",
     "scripts/",
     "modules/",
+    "cli-platform-service/",
     "install.js"
   ],
   "scripts": {

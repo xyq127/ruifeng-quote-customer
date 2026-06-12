@@ -1,10 +1,12 @@
 ---
 name: ruifeng-data-cleaning
 description: 睿锋智链数据清洗主流程 — 综合工厂编号解析、17vin EPC 查询、泰安联浏览器查询、睿锋后台 API 查询，对单个产品进行全维度交叉验证，输出清洗报告。数据源优先级: 泰安联≈17vin > 电商平台。在数据源查询结果中，优先选取主机大厂OE(丰田/本田/日产/大众/奔驰/宝马/现代/福特等)和关联编号大厂(SKF/NSK/FAG/冠盛/盖茨等)。
-version: 2.0.3
+version: 2.0.5
 author: Hermes Agent
 category: data-cleaning
 changelog: |
+  2.0.5 (2026-06-12): CLI 登录支持凭据持久化，401 自动重新登录并重试；修复 config login 的 URL 拼接 404 bug
+  2.0.4 (2026-06-09): 集成 cli-platform-service Python CLI 到项目目录，安装时自动 pip install
   2.0.3 (2026-06-09): CLI 新增 config login/oe-query；新增一代轴承 DAC 编码格式关键规则；修正安装路径
   2.0.2 (2026-06-09): 大幅精简 SKILL.md，移除历史调试笔记、重复内容、冗余代码示例，从 916 行压缩至 ~350 行
   2.0.1 (2026-06-09): 模块目录清理；合并泰安联和 TecDoc 为统一 tecdoc-search
@@ -13,7 +15,6 @@ depends_on:
   - ruifeng-factory-number-parser
   - ruifeng-17vin-epc-query
   - ruifeng-tecdoc-search
-  - cli-anything-platform-service
 ---
 
 # 睿锋智链数据清洗主流程
@@ -39,7 +40,7 @@ depends_on:
 
 **认证**: `config login` 登录获取 token（密码可从 PLATFORM_PASSWORD 环境变量或交互式输入）
 
-**安装**: `pip install -e ~/web-project/cli-platform-service`
+**安装**: CLI 已随本技能捆绑，`npm install` 后自动执行 `pip install -e "./cli-platform-service[data-clean]"`。
 
 ## 何时使用
 
@@ -268,6 +269,30 @@ Excel 批量校验时分类：
 | 泰安联无匹配 | 可能是参数编码或 OE 号不正确，标记异常 |
 | CDP 端点不通 | 检查调试 Chrome 是否运行，端口 9250 是否监听 |
 | 电商结果不一致 | 多店铺一致的 + 实物图钢印优先；冲突标注"待工厂确认" |
+
+## 通用平台管理 CLI
+
+除数据清洗外，`cli-anything-platform-service` 还覆盖供应链后台 CRUD 管理：
+
+| 命令组 | API 端点 | 说明 |
+|--------|---------|------|
+| `product` | `/api/product` | 产品管理 (CRUD, 上下架, 导入导出, ES同步) |
+| `company` | `/api/company` | 客户/供应商管理 (CRUD, 审核, 锁定/解锁, 认证) |
+| `user` | `/api/user` | 用户管理 (CRUD, 企微绑定) |
+| `inventory` | `/api/inventory` | 库存管理 (搜索, ES同步) |
+| `shopping-cart` | `/api/shoppingCart` | 购物车管理 (CRUD, 批量删除) |
+| `price` | `/api/price` | 价格管理 (C0DIG0解析, 报价导出) |
+| `quotation` | `/api/quotation` | 报价管理 (CRUD) |
+| `purchase-order` | `/api/purchaseOrder` | 采购单管理 (供应商/客户采购单CRUD) |
+| `stock-order` | `/api/stockOrder` | 出入库管理 (入库/出库, 库位设置, 过账) |
+| `menu` | `/api/menu` | 菜单管理 |
+| `role` | `/api/role` | 角色管理 (CRUD) |
+| `warehouse` | `/api/warehouse` | 仓库管理 (CRUD) |
+| `product-category` | `/api/productCategory` | 产品分类管理 (树形结构, 批量更新) |
+| `payment-term` | `/api/paymentTerm` | 付款条件管理 (CRUD) |
+| `statement` | `/api/statement` | 对账单管理 (查询, 导出) |
+
+所有命令支持 `--json` 输出和统一的 `Message`/`PageResult` 响应格式。
 
 ## 参考文件索引
 

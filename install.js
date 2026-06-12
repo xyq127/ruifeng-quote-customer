@@ -19,6 +19,7 @@ const SOURCE = __dirname;
 
 // Directories to sync
 const DIRS = ['references', 'scripts', 'modules'];
+const PLATFORM_CLI_DIR = 'cli-platform-service';
 
 function copyDir(src, dest) {
   if (!fs.existsSync(dest)) {
@@ -73,6 +74,22 @@ for (const target of TARGETS) {
   }
 
   console.log(`  Done: ${target}`);
+}
+
+// Install the bundled Python CLI package (cli-platform-service)
+const pipDir = path.join(SOURCE, PLATFORM_CLI_DIR);
+console.log(`Installing Python CLI from ${pipDir}...`);
+const { execSync } = require('child_process');
+try {
+  execSync(`pip install -e "${pipDir}"[data-clean] --break-system-packages`, {
+    cwd: SOURCE,
+    stdio: 'inherit',
+    env: { ...process.env, PIP_REQUIRE_VIRTUALENV: 'false' },
+  });
+  console.log('  Python CLI installed.');
+} catch (err) {
+  console.error(`  Warning: Python CLI install failed: ${err.message}`);
+  console.error('  You can install manually: pip install -e "./cli-platform-service[data-clean]" --break-system-packages');
 }
 
 console.log('ruifeng-data-cleaning installed successfully.');
