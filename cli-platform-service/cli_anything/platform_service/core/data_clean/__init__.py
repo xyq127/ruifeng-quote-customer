@@ -28,6 +28,7 @@ def register_commands(group):
     from .cross_validate import cross_validate
     from .excel_processor import excel_process
     from .oe_query import oe_query
+    from .quote_match import quote
 
     group.add_command(parse_cmd)
     group.add_command(backend_search)
@@ -40,3 +41,4 @@ def register_commands(group):
     group.add_command(cross_validate)
     group.add_command(excel_process)
     group.add_command(oe_query)
+    group.add_command(quote)

@@ -77,6 +77,7 @@ Environment variables: `PLATFORM_BASE_URL`, `PLATFORM_TOKEN`, `PLATFORM_MOBILE`,
 | `data-clean num-save --product-id <ID> --num <OE>` | 写入关联编号 (手动验证后, source=3 最高可信) |
 | `data-clean num-batch-save --product-id <ID> --nums "OE列表"` | 批量写入关联编号 |
 | `data-clean param-save --product-id <ID> --name <参数名> --value <值>` | 写入参数 (内径/外径/高/安装位置) |
+| `data-clean quote match --file <客户表>` | 产品报价核心链路：客户编号/车型清单 → 批量报价匹配 → 多sheet Excel (不写回后台) |
 
 ### 使用示例
 
@@ -102,6 +103,12 @@ cli-anything-platform-service data-clean num-save --product-id 007844 --num "311
 # 写入参数
 cli-anything-platform-service data-clean param-save --product-id 007844 --name "内径" --value "39mm"
 cli-anything-platform-service data-clean param-save --product-id 007844 --name "安装位置" --value "前轮"
+
+# 产品报价核心链路: 客户编号/车型清单 -> 批量报价匹配 -> 多sheet Excel (不写回后台)
+cli-anything-platform-service data-clean quote match --file 客户清单.xlsx --output 报价结果.xlsx
+
+# 启用三方补查 (未匹配编号查询替换OE/关联编号后二次回查)
+cli-anything-platform-service data-clean quote match --file 客户清单.xlsx --output 报价结果.xlsx --deep
 ```
 
 ### 前置依赖

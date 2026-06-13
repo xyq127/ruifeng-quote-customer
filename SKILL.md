@@ -1,10 +1,11 @@
 ---
 name: ruifeng-data-cleaning
 description: 睿锋智链数据清洗主流程 — 综合工厂编号解析、17vin EPC 查询、泰安联浏览器查询、睿锋后台 API 查询，对单个产品进行全维度交叉验证，输出清洗报告。数据源优先级: 泰安联≈17vin > 电商平台。在数据源查询结果中，优先选取主机大厂OE(丰田/本田/日产/大众/奔驰/宝马/现代/福特等)和关联编号大厂(SKF/NSK/FAG/冠盛/盖茨等)。
-version: 2.0.5
+version: 2.1.0
 author: Hermes Agent
 category: data-cleaning
 changelog: |
+  2.1.0 (2026-06-13): 新增产品报价核心链路 quote-match（客户编号/车型清单 → 后台批量报价匹配 → 4-sheet Excel，含三方补查）；地基改进：backend-search 归一化多轮重试链、关键规则编号修复、backend-detail HTTP code 检查、新增产品分类编号规律 reference
   2.0.5 (2026-06-12): CLI 登录支持凭据持久化，401 自动重新登录并重试；修复 config login 的 URL 拼接 404 bug
   2.0.4 (2026-06-09): 集成 cli-platform-service Python CLI 到项目目录，安装时自动 pip install
   2.0.3 (2026-06-09): CLI 新增 config login/oe-query；新增一代轴承 DAC 编码格式关键规则；修正安装路径
@@ -36,6 +37,7 @@ depends_on:
 | 泰安联搜索 | `data-clean taianlian-search --query <编号>` | 通过 Chrome CDP 搜索 TecDoc |
 | 一站式OE查询 | `data-clean oe-query --query <尺寸/DAC编码/OE>` | 整合泰安联+17vin，自动识别输入 |
 | OE 交叉验证 | `data-clean cross-validate --file <Excel>` | 批量校验关联编号 (A/B/C 分类) |
+| 产品报价匹配 | `data-clean quote match --file <客户表>` | 客户编号/车型清单 → 后台批量报价匹配 → 多 sheet Excel |
 | Excel 处理 | `data-clean excel-process read/images/merge` | Excel 读写/图片提取/跨表合并 |
 
 **认证**: `config login` 登录获取 token（密码可从 PLATFORM_PASSWORD 环境变量或交互式输入）
@@ -115,6 +117,77 @@ depends_on:
 4. **睿锋后台 API 查询** — `data-clean backend-search --keyword <关键词> --with-details`
 5. **电商平台搜索**（以上均无结果时）
 6. **标记待确认** — 直接问工厂获取 OE 号，或标记"待确认"暂存
+
+## 产品报价核心链路 quote-match
+
+### 适用场景
+
+客户给出一批产品编号/OE/车型清单（Excel 表格或纯文本编号列表），需要找到对应的雷迪克产品（系统内部以雷迪克 `code` 为准）并报价。系统批量报价接口 `/productAudit/parse` 只认编号（OE/关联编号/雷迪克编号），不识别车型列；车型 → OE 的翻译由本链路前处理补齐。
+
+### 链路图
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                  产品报价核心链路 quote-match                        │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│  输入：客户清单 (.xlsx/.xls/.txt)                                    │
+│  - 多个产品编号 (OE / 雷迪克工厂编号) 或车型描述，可混合              │
+│                                                                    │
+│  步骤1：列识别 + 车型行话翻译                                        │
+│  ├─ 按内容特征识别 OE/关联编号/车型/名称/销售等级列 (规则9)            │
+│  └─ 标签车型列翻译为 OE：本地翻译表优先，--deep 时走 17vin/泰安联     │
+│                                                                    │
+│  步骤2：生成标准报价模板                                             │
+│  └─ 表头：OE / 通用OE / 名称 / 标签车型 / 通用车型 / 销售等级          │
+│                                                                    │
+│  步骤3：调用批量报价接口                                             │
+│  ├─ POST /productAudit/parse 上传模板，创建审核任务                  │
+│  ├─ 按 importFileName 查 /productAudit/list 取审核任务 id            │
+│  └─ GET /productAuditData/findAll 拉取明细行                        │
+│                                                                    │
+│  步骤4：按 querySource 分流                                          │
+│  ├─ 唯一精确命中 (querySource∈{1,2,3,4,6,7} 且不重复) → 报价结果      │
+│  ├─ 模糊匹配(5) 或同编号多行命中 → 待技术员分辨                       │
+│  └─ querySource=0 (未命中) → 进入三方补查                            │
+│                                                                    │
+│  步骤5：三方补查 (--deep，需 CDP 9250)                               │
+│  ├─ 泰安联/17vin 查替换OE或关联编号                                  │
+│  ├─ 拿新编号二次调用 parse 回查                                      │
+│  ├─ 命中 → 三方补查待写入 (记录新OE+来源，供后续写入任务)              │
+│  └─ 仍未命中 / CDP 不可达 → 待工厂确认 (优雅降级，不中断)              │
+│                                                                    │
+│  输出：4-sheet Excel                                                │
+│  ├─ 报价结果         (产品ID/名称/雷迪克code/价格字段/置信度)          │
+│  ├─ 待技术员分辨      (同编号多候选相邻排列，附库存数供比对)            │
+│  ├─ 三方补查待写入    (新OE/来源/原始输入编号，供后续写入任务使用)       │
+│  └─ 待工厂确认        (仍无法匹配的编号/车型)                         │
+│                                                                    │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 命令示例
+
+```bash
+# 基础用法：客户表 → 4-sheet 报价 Excel
+data-clean quote match --file 客户报价单.xlsx
+
+# 启用三方补查 (未匹配项走泰安联/17vin 查替换OE/关联编号，需 CDP 9250)
+data-clean quote match --file 客户报价单.xlsx --deep
+
+# 指定商家范围 / 关联编号来源范围 / 包含修理包 / 自定义输出路径
+data-clean quote match --file 客户报价单.xlsx \
+  --supplier-range 123,456 --query-range 0,1,2,3,4 \
+  --query-repair-kit --output 报价结果.xlsx
+```
+
+### 不写回后台
+
+本链路**不调用** `num-save`/`param-save`/`priceAudit`，只生成查询用的审核任务（`/productAudit/parse` 创建审核单是系统设计的查询方式，非数据写入）。所有结果落地为 Excel 供人工确认；待技术员分辨、三方补查待写入、待工厂确认三类 sheet 经用户确认后，再单独派发写入任务。
+
+### 编号判断参考
+
+判断输入编号属于一代/二代/三代、能否拆出核心8位、属于哪个产品子分类，参考 `references/product-category-code-patterns.md`。
 
 ## 车型数据清洗（行话翻译）—— 核心预处理步骤
 
@@ -247,7 +320,7 @@ Excel 批量校验时分类：
 ### 9. Excel 列语义识别
 不要仅凭表头判断列含义。列名写"OE"但内容实际是关联编号列表、真正的 OE 号在"工厂型号"列的情况经常出现。根据列内容的格式特征识别：OE 号多为单一编号，关联编号列常含逗号分隔的多个编号。
 
-### 11. 一代轴承泰安联 DAC 编码格式
+### 10. 一代轴承泰安联 DAC 编码格式
 
 一代轴承在泰安联上搜索时，需用 DAC 编码格式 `{内径}{外径}00{高}`，而非空格分隔的尺寸。
 
@@ -257,7 +330,7 @@ Excel 批量校验时分类：
 
 也可直接用 `data-clean oe-query --query 45x84x45` 自动编码并搜索。
 
-### 12. 电商平台验证规则
+### 11. 电商平台验证规则
 必须至少 3 家不同店铺列出相同的 OE 号才可采纳。优先采信实物图 OE 钢印。多店铺结果冲突时，标注"多源不一致，待工厂确认"。
 
 ## 错误处理
@@ -303,6 +376,7 @@ Excel 批量校验时分类：
 | `references/17vin-web-navigation.md` | 17vin Web 界面导航 — URL 模式/EPC 树导航/CDP 操作技巧 |
 | `references/17vin-partsearch-fast-verify.md` | 17vin 配件搜索快速验证 — 三级验证法/品牌覆盖 |
 | `references/cross-catalog-dimension-matching.md` | 跨目录尺寸匹配规则 |
+| `references/product-category-code-patterns.md` | 产品分类编号规律 — 一代核心8位编码/二三代轮毂单元序列号/分类对照表，供 quote-match 判断编号归属 |
 | `references/excel-image-extraction.md` | Excel 内嵌图片提取 |
 | `references/architecture-spec.md` | 架构说明 |
 | `scripts/17vin_batch_oe_query.py` | 17vin 批量 OE 查询 |

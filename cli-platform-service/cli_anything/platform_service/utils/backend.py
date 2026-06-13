@@ -172,7 +172,13 @@ class PlatformServiceBackend:
                                             params=params, timeout=timeout)
             elif method.upper() == 'POST':
                 if files:
-                    response = self.session.post(url, headers=self.headers,
+                    # multipart/form-data 请求不能固定 Content-Type:
+                    # application/json，否则服务端会返回 415。去掉该 header，
+                    # 交由 requests 根据 files 自动生成带 boundary 的
+                    # multipart/form-data Content-Type。
+                    multipart_headers = {k: v for k, v in self.headers.items()
+                                          if k.lower() != 'content-type'}
+                    response = self.session.post(url, headers=multipart_headers,
                                                  data=data, files=files, timeout=timeout)
                 else:
                     response = self.session.post(url, headers=self.headers,

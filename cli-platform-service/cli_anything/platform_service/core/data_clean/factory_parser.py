@@ -158,3 +158,56 @@ def parse_cmd(code, use_json):
             click.echo(f"  ABS: {result['abs_teeth']} 齿")
         else:
             click.echo(f"  ABS: 无")
+
+
+# ── 匹配结果分类 ──────────────────────────────────────
+
+# backend-search 重试链命中轮次 → (match_type, confidence)
+_RETRY_ATTEMPT_MATCH_TYPES = {
+    "原始keyword": ("exact_oe", "high"),
+    "归一化": ("normalized_oe", "medium"),
+    "核心8位": ("core_8digit", "medium"),
+}
+
+# oe-query identify_input 类型 → 有第三方结果时的 (match_type, confidence)
+_OE_QUERY_INPUT_MATCH_TYPES = {
+    "oe": ("exact_oe", "high"),
+    "dac": ("fuzzy", "low"),
+    "dimension": ("fuzzy", "low"),
+}
+
+
+def classify_match(matched_attempt, source) -> dict:
+    """根据匹配方式对结果分类，返回结构化的 match_type/confidence.
+
+    用于 JSON 输出附加字段，供下游(如 quote-match)按可靠性分流处理.
+
+    Args:
+        matched_attempt: 匹配来源标识，取值取决于调用场景:
+            - backend-search 重试链命中轮次: "原始keyword"/"归一化"/"核心8位"/None
+            - oe-query 场景: identify_input() 返回的 type，
+              即 "oe"/"dac"/"dimension"，或 None(完全无结果)
+        source: 是否存在第三方查询结果 (bool)，
+            或 backend-search 场景下传 None/任意值(不影响结果).
+            oe-query 场景下应传 has_result(bool)：
+            tecalliance/17vin 任一方有返回结果即为 True.
+
+    Returns:
+        {
+            "match_type": "exact_oe" | "normalized_oe" | "core_8digit" | "fuzzy" | "none",
+            "confidence": "high" | "medium" | "low" | "none",
+        }
+    """
+    # backend-search 重试链场景：matched_attempt 为已知命中轮次标签
+    if matched_attempt in _RETRY_ATTEMPT_MATCH_TYPES:
+        match_type, confidence = _RETRY_ATTEMPT_MATCH_TYPES[matched_attempt]
+        return {"match_type": match_type, "confidence": confidence}
+
+    # oe-query 场景：matched_attempt 为 identify_input 的 type，
+    # source 表示 tecalliance/17vin 是否有结果
+    if matched_attempt in _OE_QUERY_INPUT_MATCH_TYPES and source:
+        match_type, confidence = _OE_QUERY_INPUT_MATCH_TYPES[matched_attempt]
+        return {"match_type": match_type, "confidence": confidence}
+
+    # 全部未命中 / 无第三方结果
+    return {"match_type": "none", "confidence": "none"}

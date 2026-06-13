@@ -15,6 +15,8 @@ import time
 import click
 import requests
 from ...platform_service_cli import output
+from .factory_parser import classify_match
+from .cache import get_cached, set_cached
 
 # ── DAC 编码工具 ─────────────────────────────────────
 
@@ -234,29 +236,56 @@ def oe_query(query, skip_tecalliance, skip_17vin, cdp_url):
         oe = dac
 
     result = {"query": query, "parsed": parsed, "tecalliance": None, "17vin": None}
+    from_cache = False
 
     # 泰安联搜索
     if not skip_tecalliance:
-        click.echo("正在搜索泰安联...", err=True)
-        tec = search_tecalliance(oe, cdp_url)
-        if tec is None:
-            click.echo("  泰安联: 需要 Playwright (pip install playwright && playwright install chromium)", err=True)
-        elif not tec:
-            click.echo("  泰安联: 无结果", err=True)
+        cached = get_cached("tecalliance", oe)
+        if cached is not None:
+            tec = cached["value"]
+            from_cache = True
+            click.echo(f"  泰安联: 缓存命中 ({len(tec or [])} 条记录)", err=True)
         else:
-            click.echo(f"  泰安联: 找到 {len(tec)} 条记录", err=True)
+            click.echo("正在搜索泰安联...", err=True)
+            tec = search_tecalliance(oe, cdp_url)
+            if tec is None:
+                click.echo("  泰安联: 需要 Playwright (pip install playwright && playwright install chromium)", err=True)
+            elif not tec:
+                click.echo("  泰安联: 无结果", err=True)
+                set_cached("tecalliance", oe, value=tec)
+            else:
+                click.echo(f"  泰安联: 找到 {len(tec)} 条记录", err=True)
+                set_cached("tecalliance", oe, value=tec)
         result["tecalliance"] = tec or []
 
     # 17vin 查询
     if not skip_17vin:
-        click.echo("正在查询 17vin...", err=True)
-        vin = search_17vin(oe)
-        if vin["oes"] or vin["brand_parts"] or vin["vehicles"]:
-            click.echo(f"  17vin: OE互换 {len(vin['oes'])}条 / "
+        cached = get_cached("17vin", oe)
+        if cached is not None:
+            vin = cached["value"]
+            from_cache = True
+            click.echo(f"  17vin: 缓存命中 (OE互换 {len(vin['oes'])}条 / "
                        f"品牌件 {len(vin['brand_parts'])}条 / "
-                       f"车型 {len(vin['vehicles'])}条", err=True)
+                       f"车型 {len(vin['vehicles'])}条)", err=True)
         else:
-            click.echo("  17vin: 无结果", err=True)
+            click.echo("正在查询 17vin...", err=True)
+            vin = search_17vin(oe)
+            if vin["oes"] or vin["brand_parts"] or vin["vehicles"]:
+                click.echo(f"  17vin: OE互换 {len(vin['oes'])}条 / "
+                           f"品牌件 {len(vin['brand_parts'])}条 / "
+                           f"车型 {len(vin['vehicles'])}条", err=True)
+            else:
+                click.echo("  17vin: 无结果", err=True)
+            set_cached("17vin", oe, value=vin)
         result["17vin"] = vin
+
+    # 结构化匹配分类: 根据 tecalliance/17vin 是否有结果 + identify_input 的 type 推断
+    tec_result = result["tecalliance"]
+    vin_result = result["17vin"]
+    has_result = bool(tec_result) or bool(
+        vin_result and (vin_result.get("oes") or vin_result.get("brand_parts") or vin_result.get("vehicles"))
+    )
+    result.update(classify_match(parsed.get("type"), has_result))
+    result["from_cache"] = from_cache
 
     output(result)
