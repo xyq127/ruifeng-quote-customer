@@ -1,10 +1,11 @@
 ---
 name: 睿锋数据清洗
 description: "睿锋智链数据清洗主流程 — 综合工厂编号解析、17vin EPC 查询、泰安联浏览器查询、睿锋后台 API 查询，对单个产品进行全维度交叉验证，输出清洗报告。数据源优先级: 泰安联≈17vin > 电商平台。在数据源查询结果中，优先选取主机大厂OE(丰田/本田/日产/大众/奔驰/宝马/现代/福特等)和关联编号大厂(SKF/NSK/FAG/冠盛/盖茨等)。"
-version: 2.1.0
+version: 2.2.0
 author: Hermes Agent
 category: data-cleaning
 changelog: |
+  2.2.0 (2026-06-15): 跨平台改造（自管 Chrome + Python 环境自动检测）；新增 CDP 连接与登录引导流程；新增子技能"快速OE查询"（CLI 优先，秒级返回）；所有 skill 名称改为中文
   2.1.0 (2026-06-13): 新增产品报价核心链路 quote-match（客户编号/车型清单 → 后台批量报价匹配 → 4-sheet Excel，含三方补查）；地基改进：backend-search 归一化多轮重试链、关键规则编号修复、backend-detail HTTP code 检查、新增产品分类编号规律 reference
   2.0.5 (2026-06-12): CLI 登录支持凭据持久化，401 自动重新登录并重试；修复 config login 的 URL 拼接 404 bug
   2.0.4 (2026-06-09): 集成 cli-platform-service Python CLI 到项目目录，安装时自动 pip install
@@ -43,6 +44,58 @@ depends_on:
 **认证**: `config login` 登录获取 token（密码可从 PLATFORM_PASSWORD 环境变量或交互式输入）
 
 **安装**: CLI 已随本技能捆绑，`npm install` 后自动执行 `pip install -e "./cli-platform-service[data-clean]"`。
+
+## 子技能索引
+
+本技能包含以下子模块，Agent 可按需加载：
+
+| 子技能 | 文件 | 用途 |
+|--------|------|------|
+| 工厂编号解析 | `modules/01-工厂编号解析/SKILL.md` | 解析 DAC/DU/RAH 格式，提取内径/外径/高度/ABS |
+| 17vin-EPC查询 | `modules/02-17vin-EPC查询/SKILL.md` | 17vin API 车型 EPC 目录/OE 反向查询 |
+| 泰安联TecDoc搜索 | `modules/04-泰安联TecDoc搜索/SKILL.md` | 浏览器 CDP 搜索 TecDoc |
+| **快速OE查询** | `modules/05-快速OE查询/SKILL.md` | **一键 OE 查询（优先 CLI，降级浏览器）** |
+
+## CDP 连接与登录
+
+Agent 执行任何需要泰安联 TecDoc 的操作前，**必须**按以下流程建立连接并确认登录态：
+
+### 1. 检测 CDP 可用性
+
+发送 HTTP GET 到 `{CDP_URL}/json/version`（默认 `http://127.0.0.1:9250`）。
+
+- **可达** → 跳到步骤 3（已连接，检查登录态）
+- **不可达** → 步骤 2（建立连接）
+
+### 2. 建立 CDP 连接
+
+**Work Buddy 环境**：
+引导用户开启 Work Buddy 的浏览器调试功能，或告知用户手动启动 Chrome 调试端口：
+```
+chrome --remote-debugging-port=9250 --remote-allow-origins=*
+```
+
+**CLI 环境**：
+Agent 自动尝试启动 Chrome 实例（Playwright `launch_persistent_context`），无需用户干预。
+
+### 3. 检测登录态
+
+打开 `https://www.tecalliance.cn`，检查是否跳转到登录页。
+判断依据：URL 包含 `/login`、页面标题含"登录"、页面内容含"请登录"。
+
+- **已登录** → 继续业务操作
+- **未登录** → 步骤 4
+
+### 4. 引导用户登录
+
+Agent 必须**明确告知**用户：
+> ⚠ 检测到泰安联登录页。请在浏览器窗口中登录泰安联（https://www.tecalliance.cn/cn/login）。登录完成后告知我，我将继续查询。
+
+等待用户确认登录完成后，再继续后续操作。**不要**在未登录状态下尝试搜索。
+
+### 5. 登录态持久化
+
+浏览器 profile 目录（`~/.claude/browser-data/ruifeng-chrome/`）自动保存 cookie，后续会话无需重复登录。仅首次或 cookie 过期时需要手动登录。
 
 ## 何时使用
 

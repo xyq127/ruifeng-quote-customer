@@ -167,6 +167,78 @@ def get_page():
     return context.new_page()
 
 
+# ── 登录态检测 ────────────────────────────────────────
+
+TAIANLIAN_LOGIN_URL = "https://www.tecalliance.cn/cn/login"
+
+
+def check_login_required(page=None) -> bool:
+    """检测当前浏览器是否在泰安联登录页.
+
+    通过检查页面 URL 和标题判断是否需要登录。
+
+    Args:
+        page: Playwright Page 对象，为 None 时自动获取
+
+    Returns:
+        True: 当前在登录页，需要用户登录
+        False: 已登录或无法判断
+    """
+    if page is None:
+        try:
+            page = get_page()
+        except BrowserNotAvailableError:
+            return False
+
+    try:
+        url = page.url
+        title = page.title()
+        # 登录页 URL 特征
+        if "/login" in url:
+            return True
+        # 登录页标题特征
+        if "登录" in title and "tecalliance" in url.lower():
+            return True
+        # 页面内容特征（快速文字检测）
+        text = page.inner_text("body")[:500]
+        if "请登录" in text or "用户登录" in text:
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def wait_for_login(page=None, timeout_seconds: int = 120) -> bool:
+    """等待用户完成泰安联登录.
+
+    轮询检测页面是否离开登录页，直到超时。
+
+    Args:
+        page: Playwright Page 对象
+        timeout_seconds: 最大等待秒数
+
+    Returns:
+        True: 登录成功（已离开登录页）
+        False: 超时，仍在登录页
+    """
+    import time
+
+    if page is None:
+        try:
+            page = get_page()
+        except BrowserNotAvailableError:
+            return False
+
+    start = time.time()
+    while time.time() - start < timeout_seconds:
+        if not check_login_required(page):
+            return True
+        time.sleep(2)
+
+    return False
+
+
 def shutdown_browser():
     """关闭浏览器并清理资源（用于测试或显式清理）."""
     global _playwright, _browser, _context

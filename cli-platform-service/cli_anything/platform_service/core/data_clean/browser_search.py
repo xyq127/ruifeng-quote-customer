@@ -14,6 +14,9 @@ from .browser_launcher import (  # noqa: F401 — re-export
     get_cdp_url,
     BrowserNotAvailableError,
     parse_tecalliance_text,
+    check_login_required,
+    wait_for_login,
+    TAIANLIAN_LOGIN_URL,
 )
 
 
@@ -51,18 +54,41 @@ def format_search_result(result: dict) -> dict:
 def _search_tecalliance_direct(query: str) -> list:
     """通过 Playwright 直接在泰安联执行搜索并提取结果.
 
+    自动检测登录态，未登录时引导用户完成登录。
+
     Returns:
         list of dict: [{brand, oes, source: "tecalliance"}, ...]
     """
-    from .browser_launcher import get_page
+    from .browser_launcher import get_page, check_login_required, wait_for_login
 
     page = get_page()
-    url = build_taianlian_search_url(query)
 
+    # ── 登录检测 ──
+    url = build_taianlian_search_url(query)
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=20000)
-        # 等待页面渲染完成
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(2000)
+
+        if check_login_required(page):
+            click.secho("", err=True)
+            click.secho("  ⚠ 检测到泰安联登录页，需要登录后才能搜索", fg="yellow", err=True)
+            click.secho("  请在浏览器窗口中完成登录:", err=True)
+            click.secho(f"    登录地址: {TAIANLIAN_LOGIN_URL}", err=True)
+            click.secho("  登录成功后 Agent 将自动继续...", fg="blue", err=True)
+
+            # 等待登录完成
+            if wait_for_login(page, timeout_seconds=120):
+                click.secho("  ✓ 登录成功，继续搜索...", fg="green", err=True)
+                # 重新导航到搜索页
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                page.wait_for_timeout(3000)
+            else:
+                click.secho("  ✗ 登录超时，请手动登录后重试", fg="red", err=True)
+                return []
+        else:
+            # 已登录，等待搜索结果渲染
+            page.wait_for_timeout(1000)
+
         text = page.inner_text("body")
         return parse_tecalliance_text(text)
     except Exception:
