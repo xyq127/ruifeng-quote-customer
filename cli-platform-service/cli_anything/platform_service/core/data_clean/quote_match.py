@@ -16,7 +16,7 @@ import re
 import click
 
 from .cross_validate import _run_excel_script
-from .browser_search import check_cdp_ready, get_cdp_url
+from .browser_launcher import check_cdp_ready, get_cdp_url
 from .oe_query import search_17vin, search_tecalliance
 from .cache import get_cached, set_cached
 
@@ -86,7 +86,6 @@ for i in range(1, ws.nrows):
         rows.append(row)
 print(json.dumps({"headers": headers, "rows": rows}, ensure_ascii=False))
 """
-        python = "/usr/bin/python3"
     else:
         script = """
 import sys, openpyxl, json
@@ -101,9 +100,8 @@ for row in all_rows[1:]:
         rows.append(r)
 print(json.dumps({"headers": headers, "rows": rows}, ensure_ascii=False))
 """
-        python = "/home/linuxbrew/.linuxbrew/bin/python3"
 
-    stdout = _run_excel_script(script, filepath, python)
+    stdout = _run_excel_script(script, filepath)
     parsed = json.loads(stdout)
     rows = [{"raw_row": r, "row_index": i} for i, r in enumerate(parsed["rows"])]
     return {"headers": parsed["headers"], "rows": rows}

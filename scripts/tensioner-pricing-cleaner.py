@@ -1,4 +1,4 @@
-#!/home/linuxbrew/.linuxbrew/bin/python3
+#!/usr/bin/env python3
 """
 张紧轮/惰轮报价清单清洗脚本模板
 修改 SOURCE_PATH 指向实际数据文件后运行。

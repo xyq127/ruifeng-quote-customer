@@ -30,7 +30,6 @@ for i in range(1, ws.nrows):
         rows.append(row)
 print(json.dumps(rows, ensure_ascii=False))
 """
-        python = "/usr/bin/python3"
     else:
         script = """
 import sys, openpyxl, json
@@ -43,9 +42,8 @@ for row in ws.iter_rows(min_row=2, values_only=True):
         rows.append(r)
 print(json.dumps(rows, ensure_ascii=False))
 """
-        python = "/home/linuxbrew/.linuxbrew/bin/python3"
 
-    stdout = _run_excel_script(script, filepath, python)
+    stdout = _run_excel_script(script, filepath)
     return json.loads(stdout)
 
 

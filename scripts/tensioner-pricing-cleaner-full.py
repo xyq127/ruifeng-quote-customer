@@ -1,4 +1,4 @@
-#!/home/linuxbrew/.linuxbrew/bin/python3
+#!/usr/bin/env python3
 """
 张紧轮/惰轮报价清单全量清洗脚本（含知识库）
 适用于有盖茨GTA码的发电机张紧器/惰轮/过渡轮报价清单。

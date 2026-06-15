@@ -31,7 +31,7 @@ setup(
             "flake8>=5.0",
         ],
         "data-clean": [
-            "cloakbrowser>=0.2.0",
+            "playwright>=1.40",
             "openpyxl>=3.0",
             "pandas>=1.5",
             "xlrd>=2.0",

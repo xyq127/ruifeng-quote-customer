@@ -81,69 +81,42 @@ def identify_input(raw: str):
 # ── 泰安联搜索 ───────────────────────────────────────
 
 def search_tecalliance(query: str, cdp_url: str = "http://127.0.0.1:9250"):
-    """通过 Playwright CDP 搜索泰安联并提取结果.
+    """通过 Playwright 同步 API 搜索泰安联并提取结果.
+
+    自动启动/复用 Chrome 实例（browser_launcher），无需外部 CDP Server。
+
+    Args:
+        query: 搜索关键词 (DAC 编码或 OE 号)
+        cdp_url: CDP 端点 URL (保留参数兼容性，实际由 browser_launcher 管理)
 
     Returns:
-        list of dict: [{brand, oes, vehicles, source}, ...]
+        list of dict: [{brand, oes, source: "tecalliance"}, ...]
+        None: 浏览器不可用时降级
     """
     try:
-        from playwright.async_api import async_playwright
+        from .browser_launcher import get_page, parse_tecalliance_text, BrowserNotAvailableError
     except ImportError:
-        return None  # 调用方处理降级
-
-    import asyncio
-
-    async def _search():
-        async with async_playwright() as p:
-            browser = await p.chromium.connect_over_cdp(cdp_url)
-            ctx = browser.contexts[0]
-            page = await ctx.new_page()
-            results = []
-
-            url = (f"https://www.tecalliance.cn/cn/search/1?q={query}"
-                   f"&numbersearchinput=1&searchtype=0&status=1")
-            try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=20000)
-                await asyncio.sleep(3)
-
-                text = await page.inner_text("body")
-                if "搜索结果 0" in text or "总共 0" in text:
-                    return results
-
-                # Extract result blocks — look for product entries
-                blocks = text.split("\n\n")
-                current = {}
-                for line in blocks:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    # Detect brand line (uppercase brand names)
-                    if line.isupper() and len(line) > 2 and line not in ('ZH',):
-                        if current.get("brand"):
-                            results.append(current)
-                        current = {"brand": line, "oes": [], "vehicles": []}
-                        continue
-                    # Collect OE numbers
-                    oe_match = re.search(r'\b\d{6,15}\b', line)
-                    if oe_match and current:
-                        oe = oe_match.group()
-                        if oe not in current["oes"]:
-                            current["oes"].append(oe)
-
-                if current.get("brand"):
-                    results.append(current)
-
-            except Exception:
-                pass
-            finally:
-                await page.close()
-
-            return results
+        return None
 
     try:
-        return asyncio.run(_search())
-    except Exception:
+        page = get_page()
+    except BrowserNotAvailableError:
         return None
+
+    url = (f"https://www.tecalliance.cn/cn/search/1?q={query}"
+           f"&numbersearchinput=1&searchtype=0&status=1")
+
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        page.wait_for_timeout(3000)
+        text = page.inner_text("body")
+        results = parse_tecalliance_text(text)
+    except Exception:
+        results = []
+    finally:
+        page.close()
+
+    return results
 
 
 # ── 17vin Section 4 查询 ─────────────────────────────

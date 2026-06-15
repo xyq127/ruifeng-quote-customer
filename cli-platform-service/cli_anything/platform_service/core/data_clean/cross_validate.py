@@ -6,6 +6,7 @@
 
 import json
 import os
+import sys
 import subprocess
 import tempfile
 import click
@@ -16,9 +17,11 @@ from .factory_parser import normalize_oe, is_dac_format
 # ── 校验逻辑 ──────────────────────────────────────────
 
 def _run_excel_script(script_content: str, filepath: str,
-                      python_path: str = "/home/linuxbrew/.linuxbrew/bin/python3",
+                      python_path: str = None,
                       input_data: str = None) -> str:
     """安全地执行 Excel 读取脚本，通过命令行参数传递路径避免注入."""
+    if python_path is None:
+        python_path = sys.executable
     tmpdir = tempfile.gettempdir()
     script_path = os.path.join(tmpdir, f"_xl_script_{os.getpid()}.py")
     with open(script_path, 'w') as f:
