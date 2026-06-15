@@ -81,42 +81,27 @@ def identify_input(raw: str):
 # ── 泰安联搜索 ───────────────────────────────────────
 
 def search_tecalliance(query: str, cdp_url: str = "http://127.0.0.1:9250"):
-    """通过 Playwright 同步 API 搜索泰安联并提取结果.
+    """泰安联快速搜索 — response 拦截模式（优先），降级文本解析.
 
     自动启动/复用 Chrome 实例（browser_launcher），无需外部 CDP Server。
 
     Args:
         query: 搜索关键词 (DAC 编码或 OE 号)
-        cdp_url: CDP 端点 URL (保留参数兼容性，实际由 browser_launcher 管理)
+        cdp_url: CDP 端点 URL (保留参数兼容性)
 
     Returns:
         list of dict: [{brand, oes, source: "tecalliance"}, ...]
         None: 浏览器不可用时降级
     """
     try:
-        from .browser_launcher import get_page, parse_tecalliance_text, BrowserNotAvailableError
+        from .browser_launcher import search_tecalliance_fast, BrowserNotAvailableError
     except ImportError:
         return None
 
     try:
-        page = get_page()
+        return search_tecalliance_fast(query)
     except BrowserNotAvailableError:
         return None
-
-    url = (f"https://www.tecalliance.cn/cn/search/1?q={query}"
-           f"&numbersearchinput=1&searchtype=0&status=1")
-
-    try:
-        page.goto(url, wait_until="domcontentloaded", timeout=20000)
-        page.wait_for_timeout(3000)
-        text = page.inner_text("body")
-        results = parse_tecalliance_text(text)
-    except Exception:
-        results = []
-    finally:
-        page.close()
-
-    return results
 
 
 # ── 17vin Section 4 查询 ─────────────────────────────

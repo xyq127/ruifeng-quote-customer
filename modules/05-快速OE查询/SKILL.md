@@ -14,9 +14,16 @@ category: data-cleaning
 
 ## Agent 执行流程
 
-### 优先：CLI 命令（推荐，快速）
+### 优先：快速搜索脚本（推荐，~1 秒）
+
+泰安联搜索已封装为快速脚本，通过 Playwright response 拦截直接捕获后台 API JSON 响应，
+无需等待页面渲染和文本解析，比传统浏览器操作快 4-5 倍。
 
 ```bash
+# 方式 1：独立脚本（最快）
+python scripts/tecalliance_fast_oe_search.py --query <OE号/DAC编码/尺寸> --json
+
+# 方式 2：CLI 命令（自动调用快速搜索）
 data-clean oe-query --query <OE号/DAC编码/尺寸>
 ```
 

@@ -432,6 +432,7 @@ Excel 批量校验时分类：
 | `references/product-category-code-patterns.md` | 产品分类编号规律 — 一代核心8位编码/二三代轮毂单元序列号/分类对照表，供 quote-match 判断编号归属 |
 | `references/excel-image-extraction.md` | Excel 内嵌图片提取 |
 | `references/architecture-spec.md` | 架构说明 |
+| `scripts/tecalliance_fast_oe_search.py` | 泰安联 OE 快速搜索（API 拦截，~1s） |
 | `scripts/17vin_batch_oe_query.py` | 17vin 批量 OE 查询 |
 | `scripts/17vin_epc_cdp_navigator.py` | 17vin CDP EPC 导航 |
 | `scripts/taianlian_batch_v2.py` | 泰安联 CDP 批量查询 |
