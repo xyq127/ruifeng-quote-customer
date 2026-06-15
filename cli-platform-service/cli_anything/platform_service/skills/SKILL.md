@@ -1,5 +1,5 @@
 ---
-name: "cli-anything-platform-service"
+name: "睿锋平台CLI"
 description: "睿峰智链汽车配件供应链平台 CLI 管理工具。通过命令行与 platform-service REST API 交互，管理产品、客户/供应商、用户、库存、购物车、采购单、出入库等全部业务模块。"
 ---
 
