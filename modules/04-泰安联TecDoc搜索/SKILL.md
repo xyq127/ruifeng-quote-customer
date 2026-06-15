@@ -1,5 +1,5 @@
 ---
-name: ruifeng-tecdoc-search
+name: 泰安联TecDoc搜索
 description: 当用户需要通过泰安联（TaiAnLian）或 TecDoc（TecAlliance）查询配件 OE 号、适配车型、物理参数，或进行第三方数据交叉验证时使用。包含浏览器 CDP 搜索和结果提取。
 version: 2.0.0
 author: Hermes Agent

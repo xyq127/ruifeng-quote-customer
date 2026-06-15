@@ -1,5 +1,5 @@
 ---
-name: ruifeng-data-cleaning
+name: 睿锋数据清洗
 description: "睿锋智链数据清洗主流程 — 综合工厂编号解析、17vin EPC 查询、泰安联浏览器查询、睿锋后台 API 查询，对单个产品进行全维度交叉验证，输出清洗报告。数据源优先级: 泰安联≈17vin > 电商平台。在数据源查询结果中，优先选取主机大厂OE(丰田/本田/日产/大众/奔驰/宝马/现代/福特等)和关联编号大厂(SKF/NSK/FAG/冠盛/盖茨等)。"
 version: 2.1.0
 author: Hermes Agent
@@ -13,9 +13,9 @@ changelog: |
   2.0.1 (2026-06-09): 模块目录清理；合并泰安联和 TecDoc 为统一 tecdoc-search
   2.0.0 (2026-06-04): 移除 spareto 品牌分流；新增"车型数据清洗（行话翻译）"核心章节
 depends_on:
-  - ruifeng-factory-number-parser
-  - ruifeng-17vin-epc-query
-  - ruifeng-tecdoc-search
+  - 工厂编号解析
+  - 17vin-EPC查询
+  - 泰安联TecDoc搜索
 ---
 
 # 睿锋智链数据清洗主流程

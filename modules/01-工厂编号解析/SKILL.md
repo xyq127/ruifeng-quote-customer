@@ -1,5 +1,5 @@
 ---
-name: ruifeng-factory-number-parser
+name: 工厂编号解析
 description: 当用户需要解析雷迪克（Radick）工厂编号（DAC/DU/RAH 格式），提取内径、外径、高度、变型、ABS 齿数等物理参数，或生成 8 位核心编号用于后续 TecDoc/17vin 搜索时使用。数据清洗流程的起点。
 version: 1.0.0
 author: Hermes Agent
