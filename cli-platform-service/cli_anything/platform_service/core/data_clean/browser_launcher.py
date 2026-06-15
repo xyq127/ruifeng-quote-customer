@@ -85,21 +85,23 @@ def _get_playwright():
 
 
 def ensure_browser(headless: bool = False, cdp_port: int = DEFAULT_CDP_PORT):
-    """启动或复用 Chrome 实例（同步 API，持久化 profile）.
+    """获取浏览器实例（混合模式）.
 
-    首次调用启动新 Chrome，后续调用返回缓存的 browser/context。
-    使用 launch_persistent_context 持久化 cookie/login session，
-    保留泰安联/TecDoc 登录态，无需每次重新登录。
+    优先连接已有 CDP 端点（Work Buddy / 用户自启 Chrome），
+    复用其登录态和 cookie。
+    CDP 不可达时自动启动独立 Chrome 实例（持久化 profile）。
+
+    后续调用返回缓存的 browser/context，不重复创建。
 
     Args:
-        headless: 是否无头模式（默认 False，显示窗口）
+        headless: 仅对自动启动模式生效
         cdp_port: Chrome DevTools Protocol 端口
 
     Returns:
         (browser, context) 元组
 
     Raises:
-        BrowserNotAvailableError: Playwright 未安装或启动失败
+        BrowserNotAvailableError: Playwright 未安装或所有方式均失败
     """
     global _playwright, _browser, _context
 
@@ -111,8 +113,25 @@ def ensure_browser(headless: bool = False, cdp_port: int = DEFAULT_CDP_PORT):
 
     try:
         _playwright = SyncPlaywright().start()
-        user_data_dir = get_user_data_dir()
+    except Exception as e:
+        raise BrowserNotAvailableError(f"Playwright 启动失败: {e}")
 
+    cdp_url = f"http://127.0.0.1:{cdp_port}"
+
+    # ── 优先连接已有 CDP（Work Buddy / 用户自启 Chrome）──
+    if check_cdp_ready(cdp_url):
+        try:
+            _browser = _playwright.chromium.connect_over_cdp(cdp_url)
+            _context = _browser.contexts[0] if _browser.contexts else _browser.new_context()
+            logger.info("已连接现有 CDP: %s", cdp_url)
+            return _browser, _context
+        except Exception as e:
+            logger.warning("CDP 连接失败 (%s)，回退到自动启动: %s", cdp_url, e)
+            # CDP 探测通过但连接失败 → 可能是短暂的，继续尝试自动启动
+
+    # ── 无 CDP → 自动启动独立 Chrome（持久化 profile）──
+    user_data_dir = get_user_data_dir()
+    try:
         _context = _playwright.chromium.launch_persistent_context(
             user_data_dir=user_data_dir,
             headless=headless,
@@ -122,13 +141,11 @@ def ensure_browser(headless: bool = False, cdp_port: int = DEFAULT_CDP_PORT):
                 "--no-first-run",
                 "--no-default-browser-check",
             ],
-            # 中文 locale，避免页面编码问题
             locale="zh-CN",
-            # 合理超时
             timeout=30000,
         )
         _browser = _context.browser
-        logger.info("Chrome 已启动 (CDP: %s, profile: %s)", cdp_port, user_data_dir)
+        logger.info("Chrome 已自动启动 (CDP: %s, profile: %s)", cdp_port, user_data_dir)
         return _browser, _context
 
     except Exception as e:
