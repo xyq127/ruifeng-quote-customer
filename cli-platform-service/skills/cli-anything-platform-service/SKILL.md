@@ -49,7 +49,10 @@ Environment variables: `PLATFORM_BASE_URL`, `PLATFORM_TOKEN`, `PLATFORM_MOBILE`,
 | `user` | `/api/user` | 用户管理 (CRUD, 企微绑定) |
 | `inventory` | `/api/inventory` | 库存管理 (搜索, ES同步) |
 | `shopping-cart` | `/api/shoppingCart` | 购物车管理 (CRUD, 批量删除) |
-| `price` | `/api/price` | 价格管理 (C0DIG0解析, 报价导出) |
+| `price` | `/api/price` | 价格解析管理 (C0DIG0解析, 报价导出) |
+| `price-approval` | `/api/priceChangeApproval` | 价格变更审批 (列表/通过/拒绝/批量审批/导入) |
+| `price-list` | `/api/priceList` | 价格清单管理 (CRUD, 全部查询) |
+| `price-item` | `/api/priceListItem` | 价格清单明细管理 (CRUD, 导入) |
 | `quotation` | `/api/quotation` | 报价管理 (CRUD) |
 | `purchase-order` | `/api/purchaseOrder` | 采购单管理 (供应商/客户采购单CRUD) |
 | `stock-order` | `/api/stockOrder` | 出入库管理 (入库/出库, 库位设置, 过账) |
@@ -111,10 +114,112 @@ cli-anything-platform-service data-clean quote match --file 客户清单.xlsx --
 cli-anything-platform-service data-clean quote match --file 客户清单.xlsx --output 报价结果.xlsx --deep
 ```
 
+## Price Approval 命令组 (价格变更审批)
+
+### 命令列表
+
+| Command | 说明 |
+|---------|------|
+| `price-approval pending [--status] [--batch-no]` | 审批列表（按状态/批次筛选） |
+| `price-approval find-by-id --id <ID>` | 审批记录详情 |
+| `price-approval approve --id <ID> [--remark]` | 审批通过 |
+| `price-approval reject --id <ID> [--remark]` | 审批拒绝 |
+| `price-approval batch-summary` | 批次审批汇总 |
+| `price-approval approve-batch --batch-no <号>` | 按批次整体通过 |
+| `price-approval reject-batch --batch-no <号>` | 按批次整体拒绝 |
+| `price-approval approve-by-ids --ids-json <JSON>` | 批量通过（勾选多条） |
+| `price-approval reject-by-ids --ids-json <JSON>` | 批量拒绝（勾选多条） |
+| `price-approval import --file <Excel> --price-type <编码>` | Excel导入价格变更（2-P2/3-P3/6-采购价/10-OEM价） |
+| `price-approval import-multi-price --file <Excel>` | 批量导入多种价格变更 |
+
+### 使用示例
+
+```bash
+# 查看待审批列表
+cli-anything-platform-service price-approval pending --status 0
+
+# 按产品编码搜索待审批记录
+cli-anything-platform-service price-approval pending --code 39720037
+
+# 查看批次汇总
+cli-anything-platform-service price-approval batch-summary
+
+# 审批通过单条
+cli-anything-platform-service price-approval approve --id ABC123 --remark "价格合理"
+
+# 按批次整体通过
+cli-anything-platform-service price-approval approve-batch --batch-no BATCH20260601
+
+# 批量通过多条
+cli-anything-platform-service price-approval approve-by-ids --ids-json '["id1","id2"]'
+
+# 导入价格变更Excel
+cli-anything-platform-service price-approval import --file 价格变更.xlsx --price-type 6
+
+# 导入多种价格变更
+cli-anything-platform-service price-approval import-multi-price --file 多种价格修改.xlsx
+```
+
+## Price List 命令组 (价格清单)
+
+### 命令列表
+
+| Command | 说明 |
+|---------|------|
+| `price-list list [--name] [--type] [--status]` | 价格清单列表 |
+| `price-list find-all` | 全部启用的价格清单（下拉选择） |
+| `price-list find-by-id --id <ID>` | 价格清单详情 |
+| `price-list create --name <名称> [--type] [--status]` | 新增价格清单 |
+| `price-list update --id <ID> [--name] [--status]` | 更新价格清单 |
+| `price-list delete --id <ID>` | 删除价格清单 |
+
+### 使用示例
+
+```bash
+# 查看价格清单
+cli-anything-platform-service price-list list
+
+# 新建P2价格清单
+cli-anything-platform-service price-list create --name "2026年P2价格表" --type P2 --status 1
+
+# 查询全部
+cli-anything-platform-service price-list find-all
+```
+
+## Price Item 命令组 (价格清单明细)
+
+### 命令列表
+
+| Command | 说明 |
+|---------|------|
+| `price-item list --price-list-id <ID> [--keyword]` | 价格清单明细列表 |
+| `price-item find-by-price-list --price-list-id <ID>` | 按价格清单ID查所有明细 |
+| `price-item find-by-id --id <ID>` | 明细详情 |
+| `price-item create --price-list-id <ID> --product-id <ID> --price <价>` | 新增明细 |
+| `price-item update --id <ID> [--price]` | 更新明细（价格修改自动提交审批） |
+| `price-item delete --id <ID>` | 删除明细 |
+| `price-item import --price-list-id <ID> --file <Excel>` | 导入价格清单明细 |
+
+### 使用示例
+
+```bash
+# 查看某价格清单的明细
+cli-anything-platform-service price-item list --price-list-id PL001
+
+# 按关键字搜索明细
+cli-anything-platform-service price-item list --price-list-id PL001 --keyword 轴承
+
+# 新增明细
+cli-anything-platform-service price-item create --price-list-id PL001 --product-id P001 --price 120.50
+
+# 导入明细Excel
+cli-anything-platform-service price-item import --price-list-id PL001 --file 明细.xlsx
+```
+
 ### 前置依赖
 - `taianlian-search` 需要 Chrome CDP 运行在 127.0.0.1:9250
 - `epc-query` 需要环境变量 `17VIN_USERNAME` / `17VIN_PASSWORD`
-- 后台相关命令 (`backend-*` / `num-*` / `param-*`) 依赖 `~/.cli-anything-platform-service/config.json`
+- 后台相关命令 (`backend-*` / `num-*` / `param-*` / `price-*`) 依赖 `~/.cli-anything-platform-service/config.json`
 - `num-save` / `param-save` 写入数据标记为 originalSource=3 (手动添加) — 系统最高可信等级
 
 ## OE 与关联编号

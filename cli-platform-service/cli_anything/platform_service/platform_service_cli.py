@@ -180,7 +180,7 @@ from .core.company import company
 from .core.user import user
 from .core.inventory import inventory
 from .core.shopping_cart import shopping_cart
-from .core.price import price
+from .core.price import price, price_approval, price_list, price_item
 from .core.quotation import quotation
 from .core.purchase_order import purchase_order
 from .core.stock_order import stock_order
@@ -201,6 +201,9 @@ cli.add_command(user)
 cli.add_command(inventory)
 cli.add_command(shopping_cart)
 cli.add_command(price)
+cli.add_command(price_approval)
+cli.add_command(price_list)
+cli.add_command(price_item)
 cli.add_command(quotation)
 cli.add_command(purchase_order)
 cli.add_command(stock_order)
@@ -296,7 +299,10 @@ def _build_help_dict() -> dict:
         "user": "用户管理 (list, get, create, update)",
         "inventory": "库存管理 (list, get, delete, sync)",
         "shopping-cart": "购物车管理 (list, add, update, delete, batch-delete, count)",
-        "price": "价格管理 (parse, export-quotes)",
+        "price": "价格解析管理 (parse, export-quotes)",
+        "price-approval": "价格变更审批 (pending, find-by-id, approve, reject, batch-approve, import)",
+        "price-list": "价格清单管理 (list, find-all, find-by-id, create, update, delete)",
+        "price-item": "价格清单明细管理 (list, find-by-price-list, create, update, delete, import)",
         "quotation": "报价管理 (list, get, create, delete)",
         "purchase-order": "采购单管理 (supplier/customer list, get, create, cancel)",
         "stock-order": "出入库管理 (list, get, purchase-in, order-out, set-location, post, delete)",
