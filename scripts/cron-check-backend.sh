@@ -3,7 +3,7 @@
 # 被 crontab 调用，输出到日志文件
 
 BACKEND_DIR="$HOME/web-project/ruifeng-platform/backend-code-repo"
-PROJECT_DIR="$HOME/web-project/ruifeng-data-cleaning"
+PROJECT_DIR="$HOME/web-project/ruifeng-data-governance"
 LOG_DIR="$HOME/.claude/cache"
 LOG_FILE="$LOG_DIR/backend-scan-$(date +%Y%m%d).log"
 
