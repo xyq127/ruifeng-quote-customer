@@ -1,441 +1,242 @@
 ---
-name: 睿锋数据清洗
-description: "睿锋智链数据清洗主流程 — 综合工厂编号解析、17vin EPC 查询、泰安联浏览器查询、睿锋后台 API 查询，对单个产品进行全维度交叉验证，输出清洗报告。数据源优先级: 泰安联≈17vin > 电商平台。在数据源查询结果中，优先选取主机大厂OE(丰田/本田/日产/大众/奔驰/宝马/现代/福特等)和关联编号大厂(SKF/NSK/FAG/冠盛/盖茨等)。"
-version: 2.2.0
+name: 睿锋数据治理
+description: "睿锋智链汽车配件数据治理 — Plan → Execute → Verify 循环框架。覆盖数据获取（多源OE查询）、数据校验（三位一体交叉验证）、数据补充（缺失数据回写）。数据源优先级: 泰安联≈17vin > 电商平台。编号选取优先级: 主机大厂OE > 关联编号大厂 > 其他小厂。"
+version: 3.0.0
 author: Hermes Agent
-category: data-cleaning
+category: data-governance
 changelog: |
-  2.2.0 (2026-06-15): 跨平台改造（自管 Chrome + Python 环境自动检测）；新增 CDP 连接与登录引导流程；新增子技能"快速OE查询"（CLI 优先，秒级返回）；所有 skill 名称改为中文
-  2.1.0 (2026-06-13): 新增产品报价核心链路 quote-match（客户编号/车型清单 → 后台批量报价匹配 → 4-sheet Excel，含三方补查）；地基改进：backend-search 归一化多轮重试链、关键规则编号修复、backend-detail HTTP code 检查、新增产品分类编号规律 reference
-  2.0.5 (2026-06-12): CLI 登录支持凭据持久化，401 自动重新登录并重试；修复 config login 的 URL 拼接 404 bug
-  2.0.4 (2026-06-09): 集成 cli-platform-service Python CLI 到项目目录，安装时自动 pip install
-  2.0.3 (2026-06-09): CLI 新增 config login/oe-query；新增一代轴承 DAC 编码格式关键规则；修正安装路径
-  2.0.2 (2026-06-09): 大幅精简 SKILL.md，移除历史调试笔记、重复内容、冗余代码示例，从 916 行压缩至 ~350 行
-  2.0.1 (2026-06-09): 模块目录清理；合并泰安联和 TecDoc 为统一 tecdoc-search
-  2.0.0 (2026-06-04): 移除 spareto 品牌分流；新增"车型数据清洗（行话翻译）"核心章节
+  3.0.0 (2026-06-17): 架构重构 — Plan→Execute→Verify 循环框架；CLI 拆分为独立仓库 cli-anything-platform-service；新增 workflows/ 目录定义核心工作流；项目更名为「睿锋数据治理」
+  2.2.0 (2026-06-15): 跨平台改造（自管 Chrome + Python 环境自动检测）；新增 CDP 连接与登录引导流程；新增子技能"快速OE查询"
+  2.1.0 (2026-06-13): 新增产品报价核心链路 quote-match；地基改进：backend-search 归一化多轮重试链
+  2.0.x (2026-06-04~12): 初始版本 — 工厂编号解析、OE交叉验证、多源查询、参数回写
 depends_on:
   - 工厂编号解析
   - 17vin-EPC查询
   - 泰安联TecDoc搜索
+  - 快速OE查询
 ---
 
-# 睿锋智链数据清洗主流程
+# 睿锋数据治理
 
 ## 概述
 
-综合多个模块技能，对单个或批量产品进行全维度交叉验证，输出清洗报告。清洗目标是确认"工厂编号 ↔ OE ↔ 车型"三位一体映射的准确性。
+睿锋智链汽车配件数据治理技能，对配件数据进行**获取 → 校验 → 补充**的完整闭环处理。核心目标是确认"工厂编号 ↔ OE ↔ 车型"三位一体映射的准确性。
 
-## CLI 命令速查
+## 依赖
 
-所有数据清洗流程已集成到 `cli-anything-platform-service` CLI 的 `data-clean` 命令组：
+- **CLI 工具：** `cli-anything-platform-service`（需独立安装）
+  ```bash
+  pip install -e /path/to/cli-anything-platform-service[data-clean]
+  ```
+- **Chrome CDP：** 部分工作流需要 Chrome 调试端口 9250（泰安联搜索）
+- **17vin API：** 设置环境变量 `17VIN_USERNAME` / `17VIN_PASSWORD`，并确保 `no_proxy` 包含 `api.17vin.com`
 
-| 操作 | CLI 命令 | 说明 |
-|------|---------|------|
-| 工厂编号解析 | `data-clean parse <编号>` | 解析 DAC/DU/RAH → 内径/外径/高度/ABS |
-| 后台产品搜索 | `data-clean backend-search --keyword <关键词>` | 查询 rfscm.com 产品库 |
-| 后台产品详情 | `data-clean backend-detail --product-id <ID>` | 获取关联编号和参数 |
-| 17vin EPC 查询 | `data-clean epc-query --keyword <车型>` | 17vin API 车型搜索/EPC 目录 |
-| 泰安联搜索 | `data-clean taianlian-search --query <编号>` | 通过 Chrome CDP 搜索 TecDoc |
-| 一站式OE查询 | `data-clean oe-query --query <尺寸/DAC编码/OE>` | 整合泰安联+17vin，自动识别输入 |
-| OE 交叉验证 | `data-clean cross-validate --file <Excel>` | 批量校验关联编号 (A/B/C 分类) |
-| 产品报价匹配 | `data-clean quote match --file <客户表>` | 客户编号/车型清单 → 后台批量报价匹配 → 多 sheet Excel |
-| Excel 处理 | `data-clean excel-process read/images/merge` | Excel 读写/图片提取/跨表合并 |
+---
 
-**认证**: `config login` 登录获取 token（密码可从 PLATFORM_PASSWORD 环境变量或交互式输入）
+## Plan → Execute → Verify 框架
 
-**安装**: CLI 已随本技能捆绑，`npm install` 后自动执行 `pip install -e "./cli-platform-service[data-clean]"`。
-
-## 子技能索引
-
-本技能包含以下子模块，Agent 可按需加载：
-
-| 子技能 | 文件 | 用途 |
-|--------|------|------|
-| 工厂编号解析 | `modules/01-工厂编号解析/SKILL.md` | 解析 DAC/DU/RAH 格式，提取内径/外径/高度/ABS |
-| 17vin-EPC查询 | `modules/02-17vin-EPC查询/SKILL.md` | 17vin API 车型 EPC 目录/OE 反向查询 |
-| 泰安联TecDoc搜索 | `modules/04-泰安联TecDoc搜索/SKILL.md` | 浏览器 CDP 搜索 TecDoc |
-| **快速OE查询** | `modules/05-快速OE查询/SKILL.md` | **一键 OE 查询（优先 CLI，降级浏览器）** |
-
-## CDP 连接与登录
-
-Agent 执行任何需要泰安联 TecDoc 的操作前，**必须**按以下流程建立连接并确认登录态：
-
-### 1. 检测 CDP 可用性
-
-发送 HTTP GET 到 `{CDP_URL}/json/version`（默认 `http://127.0.0.1:9250`）。
-
-- **可达** → 跳到步骤 3（已连接，检查登录态）
-- **不可达** → 步骤 2（建立连接）
-
-### 2. 建立 CDP 连接
-
-**Work Buddy 环境**：
-引导用户开启 Work Buddy 的浏览器调试功能，或告知用户手动启动 Chrome 调试端口：
-```
-chrome --remote-debugging-port=9250 --remote-allow-origins=*
-```
-
-**CLI 环境**：
-Agent 自动尝试启动 Chrome 实例（Playwright `launch_persistent_context`），无需用户干预。
-
-### 3. 检测登录态
-
-打开 `https://www.tecalliance.cn`，检查是否跳转到登录页。
-判断依据：URL 包含 `/login`、页面标题含"登录"、页面内容含"请登录"。
-
-- **已登录** → 继续业务操作
-- **未登录** → 步骤 4
-
-### 4. 引导用户登录
-
-Agent 必须**明确告知**用户：
-> ⚠ 检测到泰安联登录页。请在浏览器窗口中登录泰安联（https://www.tecalliance.cn/cn/login）。登录完成后告知我，我将继续查询。
-
-等待用户确认登录完成后，再继续后续操作。**不要**在未登录状态下尝试搜索。
-
-### 5. 登录态持久化
-
-浏览器 profile 目录（`~/.claude/browser-data/ruifeng-chrome/`）自动保存 cookie，后续会话无需重复登录。仅首次或 cookie 过期时需要手动登录。
-
-## 何时使用
-
-- 新产品入库前需要校验 OE 映射
-- 已有产品发现数据不一致，需要排查
-- 批量数据清洗（按 A 类产品优先）
-- 补充缺失的关联编号
-- 报价表/产品表通用清洗 — 自动识别各列含义（OE/关联编号/车型/产品名），标准化为 OE号+发动机型号的结构化底表
-
-## 数据源优先级
-
-| 优先级 | 数据源 | 说明 |
-|--------|--------|------|
-| 1 | 泰安联 TecDoc | CDP 浏览器查询 |
-| 1 | 17vin EPC | API + 网页端查询 |
-| 2 | 电商平台 | 淘宝/1688/京东，至少 3 家店铺一致才采纳 |
-
-泰安联 ≈ 17vin 同级，均高于电商平台。
-
-## 编号选取优先级
-
-从数据源查到多条结果时，按以下优先级选取 OE 号：
-
-| 优先级 | 编号类型 | 示例 |
-|--------|---------|------|
-| 1 | 主机大厂 OE | 丰田/本田/日产/大众/奔驰/宝马/现代/福特等，零件的设计者 |
-| 2 | 关联编号大厂 | SKF/NSK/FAG/冠盛/盖茨等，给主机厂代工的一线厂商 |
-| 3 | 其他小厂 | 识别度低，仅作辅助参考 |
-
-同一个 OE 号如果在泰安联和 17vin 上都能查到同一车型，数据可信度最高。
-
-## 批量清洗流程
+Agent 执行数据治理任务时，严格遵循以下循环：
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                  批量数据清洗流程                              │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  预处理：车型数据清洗（行话翻译）                               │
-│  - 将经销商的模糊"行话"翻译为可查询的具体车型/发动机/底盘号      │
-│                                                              │
-│  步骤0：工厂编号解析                                          │
-│  ├─ 一代轴承：DAC/DU → 提取8位核心编号搜索                     │
-│  └─ 二代/三代轮毂单元：RAH → 需后台获取参数                     │
-│                                                              │
-│  步骤1：泰安联 TecDoc 查询（优先级最高）                         │
-│  ├─ 一代轴承：用 DAC 编码 {d}{D}00{B} 搜索（如 45x84x45→45840045）  │
-│  ├─ 可一步搞定：`data-clean oe-query --query 45x84x45`             │
-│  └─ 轮毂单元：用 OE 号或车型+配件名称搜索                       │
-│                                                              │
-│  步骤2：17vin EPC 查询（泰安联未命中的产品）                     │
-│  ├─ 配件搜索快速路径（10-30秒/产品）                            │
-│  └─ CDP EPC 树导航（3-5分钟/车型，备选）                       │
-│                                                              │
-│  步骤3：电商平台搜索（泰安联+17vin均未命中）                     │
-│  ├─ 淘宝/京东/1688 搜索 "{车型} {配件名} OE号"                 │
-│  └─ 多店铺交叉验证，至少 3 家店铺一致才采纳                      │
-│                                                              │
-│  步骤4：交叉比对 + 输出报告                                    │
-│  - 多来源 OE 对比、参数对比，写入 Excel 结果表                  │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+用户输入 → PLAN（识别+匹配工作流） → EXECUTE（按工作流执行） → VERIFY（校验结果）
+                                                                    │
+                                                    通过 ←──────────┘
+                                                      │
+                                                    不通过 → 标记问题 → 回到 PLAN
 ```
 
-### 批量清洗推荐顺序
+### 1. Plan（输入识别 + 匹配工作流）
 
-1. **Excel 关联编号校验** — `data-clean cross-validate --file 文件.xlsx --check-structure`
-   - 输出三类：A) DAC格式轴承型号、B) 格式差异(归一化匹配)、C) 真正缺失
-   - 只处理 C 类；同时做结构性检查
-2. **泰安联 CDP 搜索** — 一代轴承用 DAC 编码 `{d}{D}00{B}` 搜索，或直接用 `data-clean oe-query --query <尺寸>` 一站式完成
-3. **17vin EPC**（泰安联未命中的产品）— `data-clean oe-query --query <OE> --skip-tecalliance` 或 `data-clean epc-query --keyword <车型>`
-4. **睿锋后台 API 查询** — `data-clean backend-search --keyword <关键词> --with-details`
-5. **电商平台搜索**（以上均无结果时）
-6. **标记待确认** — 直接问工厂获取 OE 号，或标记"待确认"暂存
+首先识别用户输入的类型，然后匹配对应工作流：
 
-## 产品报价核心链路 quote-match
+| 输入类型 | 示例 | 匹配工作流 |
+|---------|------|-----------|
+| 工厂编号 (DAC/DU/RAH) | `DAC39720037` | [oe-lookup](workflows/oe-lookup.md) |
+| 尺寸规格 | `45x84x45` | [oe-lookup](workflows/oe-lookup.md) |
+| OE/关联编号 | `31110-RAA-A01` | [oe-lookup](workflows/oe-lookup.md) |
+| 车型+配件名 | `本田雅阁2.4L 涨紧轮` | [oe-lookup](workflows/oe-lookup.md) |
+| 客户报价单 (Excel) | `报价单.xlsx` | [quote-match](workflows/quote-match.md) |
+| 待校验产品清单 (Excel) | `产品清单.xlsx` | cross-validate（CLI 直接调用） |
+| 纯文本编号列表 | `DAC39720037, 45840045` | 按行拆分为多个 oe-lookup |
 
-### 适用场景
+如输入类型无法识别，询问用户明确。
 
-客户给出一批产品编号/OE/车型清单（Excel 表格或纯文本编号列表），需要找到对应的雷迪克产品（系统内部以雷迪克 `code` 为准）并报价。系统批量报价接口 `/productAudit/parse` 只认编号（OE/关联编号/雷迪克编号），不识别车型列；车型 → OE 的翻译由本链路前处理补齐。
+### 2. Execute（执行工作流）
 
-### 链路图
+读取匹配的工作流文件（`workflows/*.md`），按其定义的步骤逐步执行。每条工作流定义了：
+- 触发条件
+- Plan 阶段输入识别规则
+- Execute 阶段每步的 CLI 命令、输入输出 schema、失败处理
+- Verify 阶段的校验规则和置信度分级
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                  产品报价核心链路 quote-match                        │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                    │
-│  输入：客户清单 (.xlsx/.xls/.txt)                                    │
-│  - 多个产品编号 (OE / 雷迪克工厂编号) 或车型描述，可混合              │
-│                                                                    │
-│  步骤1：列识别 + 车型行话翻译                                        │
-│  ├─ 按内容特征识别 OE/关联编号/车型/名称/销售等级列 (规则9)            │
-│  └─ 标签车型列翻译为 OE：本地翻译表优先，--deep 时走 17vin/泰安联     │
-│                                                                    │
-│  步骤2：生成标准报价模板                                             │
-│  └─ 表头：OE / 通用OE / 名称 / 标签车型 / 通用车型 / 销售等级          │
-│                                                                    │
-│  步骤3：调用批量报价接口                                             │
-│  ├─ POST /productAudit/parse 上传模板，创建审核任务                  │
-│  ├─ 按 importFileName 查 /productAudit/list 取审核任务 id            │
-│  └─ GET /productAuditData/findAll 拉取明细行                        │
-│                                                                    │
-│  步骤4：按 querySource 分流                                          │
-│  ├─ 唯一精确命中 (querySource∈{1,2,3,4,6,7} 且不重复) → 报价结果      │
-│  ├─ 模糊匹配(5) 或同编号多行命中 → 待技术员分辨                       │
-│  └─ querySource=0 (未命中) → 进入三方补查                            │
-│                                                                    │
-│  步骤5：三方补查 (--deep，需 CDP 9250)                               │
-│  ├─ 泰安联/17vin 查替换OE或关联编号                                  │
-│  ├─ 拿新编号二次调用 parse 回查                                      │
-│  ├─ 命中 → 三方补查待写入 (记录新OE+来源，供后续写入任务)              │
-│  └─ 仍未命中 / CDP 不可达 → 待工厂确认 (优雅降级，不中断)              │
-│                                                                    │
-│  输出：4-sheet Excel                                                │
-│  ├─ 报价结果         (产品ID/名称/雷迪克code/价格字段/置信度)          │
-│  ├─ 待技术员分辨      (同编号多候选相邻排列，附库存数供比对)            │
-│  ├─ 三方补查待写入    (新OE/来源/原始输入编号，供后续写入任务使用)       │
-│  └─ 待工厂确认        (仍无法匹配的编号/车型)                         │
-│                                                                    │
-└──────────────────────────────────────────────────────────────────┘
-```
+### 3. Verify（数据校验）
 
-### 命令示例
+执行完成后进入校验阶段：
+- 按工作流定义的校验规则比对多源结果
+- 输出置信度标签（A/B/C/D）
+- 通过 → 输出最终结果
+- 不通过 → 标记具体问题，回到 Plan 阶段制定修正策略（如切换数据源、降级到电商搜索、标记待工厂确认）
 
-```bash
-# 基础用法：客户表 → 4-sheet 报价 Excel
-data-clean quote match --file 客户报价单.xlsx
+---
 
-# 启用三方补查 (未匹配项走泰安联/17vin 查替换OE/关联编号，需 CDP 9250)
-data-clean quote match --file 客户报价单.xlsx --deep
+## 工作流索引
 
-# 指定商家范围 / 关联编号来源范围 / 包含修理包 / 自定义输出路径
-data-clean quote match --file 客户报价单.xlsx \
-  --supplier-range 123,456 --query-range 0,1,2,3,4 \
-  --query-repair-kit --output 报价结果.xlsx
-```
+| 工作流 | 文件 | 适用场景 |
+|--------|------|---------|
+| **OE 查询** | [workflows/oe-lookup.md](workflows/oe-lookup.md) | 单个 OE/工厂编号/尺寸/车型 → 多源查询+校验 |
+| **报价匹配** | [workflows/quote-match.md](workflows/quote-match.md) | 客户报价清单 → 批量报价+三方补查 → 4-sheet Excel |
+| 批量交叉验证 | 待迁移（当前用 CLI 直接调用） | `data-clean cross-validate --file <Excel>` |
+| 车型行话翻译 | 待迁移 | `references/chinese-vehicle-slang-engine-translation.md` |
 
-### 不写回后台
-
-本链路**不调用** `num-save`/`param-save`/`priceAudit`，只生成查询用的审核任务（`/productAudit/parse` 创建审核单是系统设计的查询方式，非数据写入）。所有结果落地为 Excel 供人工确认；待技术员分辨、三方补查待写入、待工厂确认三类 sheet 经用户确认后，再单独派发写入任务。
-
-### 编号判断参考
-
-判断输入编号属于一代/二代/三代、能否拆出核心8位、属于哪个产品子分类，参考 `references/product-category-code-patterns.md`。
-
-## 车型数据清洗（行话翻译）—— 核心预处理步骤
-
-### 为什么需要行话翻译
-
-国内汽配经销商的车型描述是"行话"，模糊且不标准。例如"本田雅阁2.4L"可能对应八代或九代、发动机是 K24Z 还是 K24W。**必须先翻译为可查询的具体数据（品牌 + 具体车型 + 年份 + 发动机/底盘号），才能进行后续查询。**
-
-### 两种产品类型的翻译路径
-
-| 维度 | 涨紧轮/惰轮 | 轮毂轴承 |
-|------|------------|---------|
-| 通用性逻辑 | 同发动机型号 → 基本通用 | 同底盘代 → 基本通用 |
-| 翻译目标 | 发动机型号 | 底盘号 |
-| 主要查询渠道 | 17vin EPC (配件搜索) | 泰安联 TecDoc + 17vin |
-| 参考文件 | `chinese-vehicle-slang-engine-translation.md` | 工厂原表 + 底盘号速查表 |
-
-**路径 A：涨紧轮/惰轮（按发动机型号）**
-```
-行话 → 查翻译表提取发动机型号 → 找到搭载该发动机的代表车型 → 17vin 配件搜索/EPC → 获取 OE
-```
-张紧器总成需严格确认发动机，惰轮/单轮可放宽到同平台。
-
-**路径 B：轮毂轴承（按底盘号）**
-```
-行话 → 确定品牌+车型+代数 → 确定底盘号 → 泰安联用8位核心编号搜索 / 17vin EPC → 获取 OE
-```
-需区分前/后轮、带/不带 ABS。
-
-### 翻译示例
-
-| 输入行话 | 翻译后发动机 | 代表车型 | 代表OE号 |
-|---------|------------|---------|---------|
-| "本田雅阁2.4L" | K24Z | 八代雅阁 2.4L (2008-2012) | 31110-RAA-A01 |
-| "朗逸1.6" | EA111 1.6L MPI | 朗逸 1.6L (2010-2014) | 03C903315C |
-| "霸道2700" | 2TR-FE 2.7L | Land Cruiser Prado 2.7L | 16620-31070 |
-| "新马自达6" | PE Skyactiv-G 2.0L | 阿特兹 2.0L (2014-2019) | PE01-15-980 |
-
-完整映射表（200+条目）见 `references/chinese-vehicle-slang-engine-translation.md`。
-
-### 防御性备注规则
-
-每次翻译后必须在备注中写明匹配前提：
-> "按 [具体年份/代数/底盘号] [发动机型号/底盘号] 匹配，不适用于 [容易混淆的其他代数/底盘]"
-
-### 电商平台搜索策略（兜底方案）
-
-当泰安联和 17vin 都查不到时，搜索 `"{车型} {配件名} OE号"`（淘宝/京东/1688）。
-
-**可靠性评级：**
-- ★★★ 多店铺一致（3+店铺统一 OE 号）
-- ★★★ 实物图 OE 钢印
-- ★★ 单店铺标注（需谨慎）
-- ★ 仅商品标题含 OE（可能是关键词优化）
-
-电商来源的 OE 号备注注明"电商平台多店铺验证"或"电商单店铺标注，待确认"。
-
-## 工厂原表交叉引用
-
-### 核心策略
-
-三通道逐级降级：
-1. **睿锋后台 API 匹配**（最可靠）：搜索 OE 号，归一化比对（去横杠空格）
-2. **OEM 号匹配工厂表**：归一化前 8-10 位，精确+模糊匹配
-3. **品牌车型模糊匹配**（建议性）：需人工核实
-
-### 关联编号 OE 校验
-
-Excel 批量校验时分类：
-- **DAC/DU 格式**：轴承规格编号，非车辆原厂 OE，需补充真实 OE
-- **格式差异**：`517200Q000` vs `51720-0Q000`，归一化后匹配
-- **真正缺失**：需外部查询补全
-
-归一化规则：去横杠、去空格、大写。
-
-### 跨表合并 + 按包装规格汇总
-
-多份产品清单（退货表、库存表、出货表）合并时：
-1. 建立参照表映射（精确匹配 → 核心8位匹配 → 近似匹配 → 前缀匹配）
-2. 合并相同编号（数量累加，尺寸优先保留非空值）
-3. 过滤无包装尺寸的行
-4. 按 (内盒尺寸, 外箱尺寸, 装箱数) 分组，累加总数量
-
-跨目录包装匹配时：同内径+外径，高度差 ≤2mm 或变型差 ≤8 → 可用同样包装规格。注意这是包装需求，不是 OE 兼容性验证。
-
-参考文件：`references/cross-catalog-dimension-matching.md`
-
-## 产品类型对清洗的影响
-
-- **惰轮/单轮/过渡轮**：放宽适配容错率（同平台不同排量通用，轴承尺寸相同即可）
-- **张紧器总成**：严格限制发动机型号（阻尼机构和弹簧张力因发动机不同而异）
+---
 
 ## 关键规则
 
-以下为多年数据清洗积累的核心规则，违反任一都可能导致清洗结果不准确。
+以下为执行过程中容易出错的硬约束：
 
-### 1. 后台 API 搜索参数必须是 queryType=ENCODE+keyword
-`product/list` 正确调用：`page=1&size=20&queryType=ENCODE&keyword=XXX`。响应字段名为 `data.content`（不是 `records`）。产品 `code` 字段经常为空，需通过 `oe` 字段识别。`productNumDetail/list` 和 `productParamDetail/list` 返回 dict 嵌套（不是 list），需遍历 values 提取。
+### 1. 后台搜索必须用 queryType=ENCODE
 
-分类搜索用 `categoryIds=655709386127314944`（涨紧轮分类），返回量远多于 keyword 搜索。惰轮/过渡轮 关键词查询结果为 0。
+CLI 已内置此参数。响应字段为 `data.content`（不是 `records`）。分类搜索用 `categoryIds` 参数，涨紧轮分类 ID: `655709386127314944`。
 
-### 2. 工厂编号解析格式
-格式：`{前缀}{内径2位}{外径2位}{外径变型2位}{高度2位}{后缀}`。例：DAC39720037 → 内径39, 外径72, 变型00, 高度37。注意中间 `00` 是外径变型，不是高度。高度是最后 2 位数字。
+### 2. 一代轴承泰安联 DAC 编码格式
 
-工厂编号内径是整数简写，后台实际记录精确值（如 `39` vs `38.993mm`），比对时允许 ±0.1mm 误差。
+格式：`{内径:02d}{外径:02d}00{高度:02d}`。例如 45×84×45 → `45840045`。用 `data-clean oe-query --query <编码>` 一步完成。
 
-### 3. ABS 状态判断
-工厂编号中没有 ABS 标识 = 不带 ABS。编号中有 `(ABS88)`、`/ABS96` 等后缀 → 带 ABS。不要从 `2RZ`、`RS` 等密封后缀推断 ABS 状态。
+### 3. 工厂编号解析顺序
 
-### 4. AI 知识 ≠ 实际数据源
-不要在 OE 匹配任务中仅靠 AI 内部训练知识替代实际数据查询。2026-06 实测发现 AI 知识库在张紧器 OE 匹配中存在根本性错误（配件类型错误、发动机泛化错误、用途错误）。
+格式：`{前缀}{内径2位}{外径2位}{变型2位}{高度2位}{后缀}`。例 `DAC39720037` → 内径39, 外径72, **变型00**, 高度37。中间 `00` 是外径变型，不是高度！
 
-正确流程：17vin 配件搜索确认配件类型 → 17vin 车型列表确认适配 → 泰安联交叉验证 → 配件厂商交叉引用 → AI 知识库仅作初步参考。
+### 4. CDP 必须顺序执行
 
-### 5. CDP 批量查询必须顺序执行
-同一 Chrome 实例共享浏览器状态，多个 agent 并行操作会导致页面冲突、标签页混乱。泰安联/TecDoc/17vin 的浏览器查询必须顺序执行，约 20-30 秒/产品。可并行的部分：web_search、无状态 HTTP 请求。
+Chrome 实例共享浏览器状态，并行操作导致页面冲突。泰安联/17vin 浏览器查询严格顺序执行。无状态 HTTP 请求可并行。
 
-### 6. 17vin 品牌覆盖
-配件搜索收录：日系(丰田/本田/日产/马自达) ✅、韩系(现代/起亚) ✅、法系(标致/雪铁龙) ✅。不可收录：德系(大众/奥迪/宝马/奔驰)、美系(福特/GM/克莱斯勒)、中国自主品牌。不可收录品牌需走 EPC 浏览器导航或泰安联。
+### 5. 17vin 品牌覆盖
 
-配件搜索 URL: `https://www.17vin.com/partsearch/{OE_no_dashes}.html`，比 EPC 树导航快 10 倍以上（10-30秒 vs 3-5分钟）。
+配件搜索收录：日系(丰田/本田/日产/马自达) ✅、韩系(现代/起亚) ✅、法系(标致/雪铁龙) ✅。
+不可收录：德系(大众/奥迪/宝马/奔驰)、美系(福特/GM)、中国自主品牌。不可收录品牌需走 EPC 浏览器导航或泰安联。
 
-17vin Section 4 API（4001/4004/40031）可用，走 API 只需 0.3秒/产品。需设置 `no_proxy` 环境变量避免代理阻断。详见 `references/17vin-section4-api.md`。
+### 6. 切忌用 AI 知识替代实际数据查询
 
-### 7. 中国自主品牌策略
-泰安联基本不收录中国品牌专用件，17vin 品牌覆盖有限。电商平台是中国品牌配件的主要民间数据源。最可靠 OE 来源：工厂直接提供 > 17vin 网页端 EPC（浏览器 CDP）> 电商多店铺交叉验证。
+AI 训练知识在 OE 匹配中存在根本性错误（配件类型错误、发动机泛化错误）。正确流程：17vin 确认配件类型 → 车型列表确认适配 → 泰安联交叉验证。AI 知识仅作初步参考。
 
-### 8. 参数接近待确认
-高度差异 1-2mm、外径小数位相近的产品不能直接排除，标记为"高度接近待确认"或"外径接近待确认"，由工厂技术人员判断。**OE 兼容性必须由工厂确认**，AI 不能自行判断。
+### 7. 电商平台验证规则
 
-### 9. Excel 列语义识别
-不要仅凭表头判断列含义。列名写"OE"但内容实际是关联编号列表、真正的 OE 号在"工厂型号"列的情况经常出现。根据列内容的格式特征识别：OE 号多为单一编号，关联编号列常含逗号分隔的多个编号。
+至少 3 家不同店铺列出相同 OE 号才可采纳。优先实物图 OE 钢印。冲突时标注"多源不一致，待工厂确认"。
 
-### 10. 一代轴承泰安联 DAC 编码格式
+### 8. 参数接近不排除
 
-一代轴承在泰安联上搜索时，需用 DAC 编码格式 `{内径}{外径}00{高}`，而非空格分隔的尺寸。
+高度差异 1-2mm、外径小数位相近的产品标记"接近待确认"，由工厂技术人员判断。**OE 兼容性必须由工厂确认，AI 不能自行判断。**
 
-- 格式：`{d:02d}{D:02d}00{B:02d}`
-- 例：45×84×45 → `45840045`
-- 例：48×86×42 → `48860042`
+### 9. Excel 列识别不要信表头
 
-也可直接用 `data-clean oe-query --query 45x84x45` 自动编码并搜索。
+列名写"OE"但内容实际是关联编号、真正的 OE 在"工厂型号"列的情况常见。按内容格式特征识别，不依赖表头。
 
-### 11. 电商平台验证规则
-必须至少 3 家不同店铺列出相同的 OE 号才可采纳。优先采信实物图 OE 钢印。多店铺结果冲突时，标注"多源不一致，待工厂确认"。
+### 10. 防御性备注
+
+每次车型翻译后必须备注匹配前提："按 [具体年份/底盘号] [发动机] 匹配，不适用于 [易混淆的其他代数]"
+
+---
+
+## 数据源优先级
+
+| 优先级 | 数据源 | 查询方式 |
+|--------|--------|---------|
+| 1 | 泰安联 TecDoc | Chrome CDP 浏览器搜索 (`data-clean oe-query` 或 `taianlian-search`) |
+| 1 | 17vin EPC | HTTP API + 配件搜索网页 (`data-clean oe-query` 或 `epc-query`) |
+| 2 | 睿锋后台 API | `data-clean backend-search --keyword <关键词>` |
+| 3 | 电商平台 | 淘宝/1688/京东，至少 3 家店铺一致才采纳 |
+
+泰安联 ≈ 17vin 同级。同一 OE 在两者都能查到同一车型时，数据可信度最高。
+
+## 编号选取优先级
+
+| 优先级 | 编号来源 | 示例品牌 |
+|--------|---------|---------|
+| 1 | 主机大厂 OE（零件设计者） | 丰田/本田/日产/大众/奔驰/宝马/现代/福特 |
+| 2 | 关联编号大厂（给主机厂代工） | SKF/NSK/FAG/冠盛/盖茨 |
+| 3 | 其他小厂 | 识别度低，仅辅助参考 |
+
+---
+
+## CDP 连接与登录
+
+Agent 执行任何需要泰安联 TecDoc 的操作前，需确认 CDP 连接和登录态：
+
+1. **检测 CDP：** `GET http://127.0.0.1:9250/json/version`
+2. **不可达** → 自动尝试启动 Chrome（CLI 已内置 `launch_persistent_context`）
+3. **打开** `https://www.tecalliance.cn` 检测登录态
+4. **未登录** → 引导用户在浏览器窗口登录，等待确认后继续
+5. **浏览器 profile** 持久化到 `~/.claude/browser-data/ruifeng-chrome/`，后续会话无需重复登录
+
+---
+
+## 置信度体系
+
+所有工作流统一使用四级置信度：
+
+| 等级 | 标签 | 条件 | 可执行操作 |
+|------|------|------|-----------|
+| **A** | 确认 | 泰安联+17vin+后台三者一致 | 可直接回写 |
+| **B** | 待补充 | 两源一致，后台无记录 | 可回写，建议人工扫一眼 |
+| **C** | 待确认 | 仅单源命中或源间不一致 | 必须人工确认后回写 |
+| **D** | 兜底 | 全部未命中 | 需工厂提供 |
+
+---
 
 ## 错误处理
 
 | 错误 | 处理 |
 |------|------|
-| 泰安联+17vin均无结果 | 走电商平台；仍无结果标记"待工厂确认" |
-| 17vin API 返回 503 | 检查 `http_proxy` 环境变量 — 代理会阻断 `api.17vin.com:8080`，设置 `no_proxy` |
-| 泰安联无匹配 | 可能是参数编码或 OE 号不正确，标记异常 |
-| CDP 端点不通 | 检查调试 Chrome 是否运行，端口 9250 是否监听 |
+| 泰安联+17vin 均无结果 | 走电商平台；仍无结果标记"待工厂确认" |
+| 17vin API 返回 503 | 检查 `no_proxy` — 代理会阻断 `api.17vin.com:8080` |
+| CDP 9250 不通 | 检查 Chrome 调试端口，或自动尝试启动 |
 | 电商结果不一致 | 多店铺一致的 + 实物图钢印优先；冲突标注"待工厂确认" |
+| 后台搜索无结果 | 标记"需补充"继续，不阻断后续 |
 
-## 通用平台管理 CLI
+---
 
-除数据清洗外，`cli-anything-platform-service` 还覆盖供应链后台 CRUD 管理：
+## CLI 命令速查
 
-| 命令组 | API 端点 | 说明 |
-|--------|---------|------|
-| `product` | `/api/product` | 产品管理 (CRUD, 上下架, 导入导出, ES同步) |
-| `company` | `/api/company` | 客户/供应商管理 (CRUD, 审核, 锁定/解锁, 认证) |
-| `user` | `/api/user` | 用户管理 (CRUD, 企微绑定) |
-| `inventory` | `/api/inventory` | 库存管理 (搜索, ES同步) |
-| `shopping-cart` | `/api/shoppingCart` | 购物车管理 (CRUD, 批量删除) |
-| `price` | `/api/price` | 价格管理 (C0DIG0解析, 报价导出) |
-| `quotation` | `/api/quotation` | 报价管理 (CRUD) |
-| `purchase-order` | `/api/purchaseOrder` | 采购单管理 (供应商/客户采购单CRUD) |
-| `stock-order` | `/api/stockOrder` | 出入库管理 (入库/出库, 库位设置, 过账) |
-| `menu` | `/api/menu` | 菜单管理 |
-| `role` | `/api/role` | 角色管理 (CRUD) |
-| `warehouse` | `/api/warehouse` | 仓库管理 (CRUD) |
-| `product-category` | `/api/productCategory` | 产品分类管理 (树形结构, 批量更新) |
-| `payment-term` | `/api/paymentTerm` | 付款条件管理 (CRUD) |
-| `statement` | `/api/statement` | 对账单管理 (查询, 导出) |
+数据治理相关命令（由 `cli-anything-platform-service` 提供）：
 
-所有命令支持 `--json` 输出和统一的 `Message`/`PageResult` 响应格式。
+| 操作 | 命令 |
+|------|------|
+| 工厂编号解析 | `data-clean parse <编号>` |
+| 一站式 OE 查询 | `data-clean oe-query --query <尺寸/DAC/OE>` |
+| 后台产品搜索 | `data-clean backend-search --keyword <关键词>` |
+| 后台产品详情 | `data-clean backend-detail --product-id <ID>` |
+| 17vin EPC 查询 | `data-clean epc-query --keyword <车型>` |
+| 泰安联搜索 | `data-clean taianlian-search --query <编号>` |
+| OE 交叉验证 | `data-clean cross-validate --file <Excel>` |
+| 报价匹配 | `data-clean quote match --file <客户表>` |
+| 写入关联编号 | `data-clean num-save --product-id <ID> --num <OE>` |
+| 批量写入编号 | `data-clean num-batch-save --product-id <ID> --nums "列表"` |
+| 写入参数 | `data-clean param-save --product-id <ID> --name <名> --value <值>` |
 
-## 参考文件索引
+所有命令支持 `--json` 输出。认证：`config login` 登录获取 token。
+
+---
+
+## 子技能索引
+
+| 子技能 | 文件 | 用途 |
+|--------|------|------|
+| 工厂编号解析 | `modules/01-工厂编号解析/SKILL.md` | 解析 DAC/DU/RAH 格式 |
+| 17vin-EPC查询 | `modules/02-17vin-EPC查询/SKILL.md` | 17vin API + 网页端查询 |
+| 泰安联TecDoc搜索 | `modules/04-泰安联TecDoc搜索/SKILL.md` | 浏览器 CDP 搜索 TecDoc |
+| 快速OE查询 | `modules/05-快速OE查询/SKILL.md` | 一键 OE 查询（CLI 优先） |
+
+---
+
+## 参考文件
 
 | 文件 | 用途 |
 |------|------|
-| `references/chinese-vehicle-slang-engine-translation.md` | 行话 → 发动机型号 + OE 号翻译表（200+条目） |
-| `references/17vin-section4-api.md` | 17vin API 完整参考 — Section 4 OEM反向 + Section 6 正向 |
-| `references/17vin-web-navigation.md` | 17vin Web 界面导航 — URL 模式/EPC 树导航/CDP 操作技巧 |
-| `references/17vin-partsearch-fast-verify.md` | 17vin 配件搜索快速验证 — 三级验证法/品牌覆盖 |
+| `references/chinese-vehicle-slang-engine-translation.md` | 车型行话 → 发动机型号 + OE 号 (200+条目) |
+| `references/17vin-section4-api.md` | 17vin Section 4/6 API 完整参考 |
+| `references/17vin-web-navigation.md` | 17vin Web 界面导航 + CDP 操作技巧 |
+| `references/17vin-partsearch-fast-verify.md` | 17vin 配件搜索快速验证方法 |
 | `references/cross-catalog-dimension-matching.md` | 跨目录尺寸匹配规则 |
-| `references/product-category-code-patterns.md` | 产品分类编号规律 — 一代核心8位编码/二三代轮毂单元序列号/分类对照表，供 quote-match 判断编号归属 |
-| `references/excel-image-extraction.md` | Excel 内嵌图片提取 |
-| `references/architecture-spec.md` | 架构说明 |
-| `scripts/tecalliance_fast_oe_search.py` | 泰安联 OE 快速搜索（API 拦截，~1s） |
-| `scripts/17vin_batch_oe_query.py` | 17vin 批量 OE 查询 |
-| `scripts/17vin_epc_cdp_navigator.py` | 17vin CDP EPC 导航 |
-| `scripts/taianlian_batch_v2.py` | 泰安联 CDP 批量查询 |
-| `scripts/tensioner-pricing-cleaner.py` | 张紧轮/惰轮报价清单清洗 |
-
-使用前加载参考文件获取交叉数据。日系/德系/韩系走量款 OE 号可靠度高，中国自主品牌优先走电商平台验证。
+| `references/product-category-code-patterns.md` | 产品分类编号规律 — 一代/二三代对照表 |
+| `references/excel-image-extraction.md` | Excel 内嵌图片提取规范 |
+| `references/architecture-spec.md` | 系统架构说明 |

@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
- * ruifeng-data-cleaning install script
+ * ruifeng-data-governance install script
  *
  * Copies the skill to both Claude Code (~/.claude/skills/) and Hermes (~/.hermes/skills/).
  * Overwrites existing files to ensure sync from the single source of truth.
+ *
+ * 依赖声明: CLI 工具 cli-anything-platform-service 需独立安装
+ *   pip install -e /path/to/cli-anything-platform-service[data-clean]
  */
 const fs = require('fs');
 const path = require('path');
@@ -11,15 +14,14 @@ const os = require('os');
 
 const HOME = os.homedir();
 const TARGETS = [
-  path.join(HOME, '.claude', 'skills', 'ruifeng-data-cleaning'),
-  path.join(HOME, '.hermes', 'skills', 'ruifeng-data-cleaning'),
+  path.join(HOME, '.claude', 'skills', 'ruifeng-data-governance'),
+  path.join(HOME, '.hermes', 'skills', 'ruifeng-data-governance'),
 ];
 
 const SOURCE = __dirname;
 
 // Directories to sync
-const DIRS = ['references', 'scripts', 'modules'];
-const PLATFORM_CLI_DIR = 'cli-platform-service';
+const DIRS = ['workflows', 'references', 'scripts', 'modules'];
 
 function copyDir(src, dest) {
   if (!fs.existsSync(dest)) {
@@ -76,46 +78,7 @@ for (const target of TARGETS) {
   console.log(`  Done: ${target}`);
 }
 
-// ── Python 环境检测 ────────────────────────────────────
-const { execSync } = require('child_process');
-
-function detectPython() {
-  const candidates = ['python3', 'python'];
-  for (const cmd of candidates) {
-    try {
-      execSync(`${cmd} --version`, { stdio: 'pipe' });
-      return cmd;
-    } catch { /* try next */ }
-  }
-  return null;
-}
-
-const pythonCmd = detectPython();
-if (!pythonCmd) {
-  console.error('错误: 未找到 Python 3.10+。请先安装 Python: https://www.python.org/downloads/');
-  process.exit(1);
-}
-console.log(`检测到 Python: ${pythonCmd}`);
-
-// ── 安装 Python CLI ───────────────────────────────────
-const pipDir = path.join(SOURCE, PLATFORM_CLI_DIR);
-console.log(`Installing Python CLI from ${pipDir}...`);
-
-// 平台感知参数: Linux 系统 Python 需要 --break-system-packages
-const isLinux = process.platform === 'linux';
-const breakFlag = isLinux ? ' --break-system-packages' : '';
-
-try {
-  execSync(`${pythonCmd} -m pip install -e "${pipDir}"[data-clean]${breakFlag}`, {
-    cwd: SOURCE,
-    stdio: 'inherit',
-    env: { ...process.env, PIP_REQUIRE_VIRTUALENV: 'false' },
-  });
-  console.log('  Python CLI installed.');
-  console.log('  注意: 首次使用前请运行 "playwright install chromium" 安装浏览器内核');
-} catch (err) {
-  console.error(`  Warning: Python CLI install failed: ${err.message}`);
-  console.error(`  You can install manually: ${pythonCmd} -m pip install -e "./cli-platform-service[data-clean]"${breakFlag}`);
-}
-
-console.log('ruifeng-data-cleaning installed successfully.');
+console.log('ruifeng-data-governance installed successfully.');
+console.log('');
+console.log('注意: 本 skill 依赖 cli-anything-platform-service CLI 工具。');
+console.log('如尚未安装: pip install -e /path/to/cli-anything-platform-service[data-clean]');
