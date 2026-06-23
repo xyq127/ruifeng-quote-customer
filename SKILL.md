@@ -22,14 +22,67 @@ depends_on:
 
 睿锋智链汽车配件数据治理技能，对配件数据进行**获取 → 校验 → 补充**的完整闭环处理。核心目标是确认"工厂编号 ↔ OE ↔ 车型"三位一体映射的准确性。
 
+## 首次配置（每用户一次）
+
+每个用户首次使用前，跑一次配置向导，把**所有个人凭据集中录入一份个人配置文件**——睿锋登录手机号+密码、17vin 用户名+密码、qwen-vision 的 SiliconFlow API Key 一处搞定：
+
+```bash
+python scripts/personal_config.py init     # 交互式录入（密码用 getpass，不进命令行历史）
+python scripts/personal_config.py show      # 查看状态（密码/Key 自动打码）
+```
+
+- **存储位置**：`~/.cli-anything-platform-service/config.json`（权限 `0o600` 仅本人可读；`RUIFENG_CONFIG` 可改路径）。与睿锋/17vin 自包含模块、RayForm-CLI **共用同一文件**，token 互通。
+- **不随 skill 分发**：该文件在用户 `$HOME` 下，`npm install` 重装 skill **不会覆盖或读取它**；仓库内只有无密钥的模板 `scripts/config.example.json` 供参考。
+- 所有自包含脚本（`ruifeng_platform.py` / `vin17_epc.py` / `recognize_image.py`）都从这份配置读凭据；环境变量（`SILICONFLOW_API_KEY`、`17VIN_*`、`PLATFORM_*`）始终可临时覆盖。
+
+### 首次运行检测（Agent 必读，执行任何查询前先做）
+
+**Agent 在执行任何查询/识别前，先检测个人配置是否就绪：**
+
+```bash
+python scripts/personal_config.py check                 # 全部功能；退出码 0=就绪, 2=首次运行/缺项
+python scripts/personal_config.py check --feature qwen  # 只查图片识别所需 Key（按本次任务需要）
+```
+
+- **退出码 0** → 配置就绪，正常执行。
+- **退出码 2（首次运行 / 缺项）→ 不要尝试查询。** 把脚本输出的「缺少项」清单**转达给用户**，并请用户**在自己的终端**运行 `python scripts/personal_config.py init` 录入这些信息。
+  - 密码/Key 用 `getpass` 安全输入，**不要让用户把密码发给 Agent**，也不要由 Agent 代填（避免进入对话/命令行历史）。
+  - 用户也可临时用环境变量提供（`SILICONFLOW_API_KEY` / `17VIN_*` / `PLATFORM_*`）。
+  - 配置完成后再继续原任务。
+
+> 任一自包含脚本在凭据缺失时也会自行打印同样的首次运行提示并非零退出——Agent 看到该提示即按上述方式引导用户，不要反复重试。
+
 ## 依赖
 
-- **CLI 工具：** `cli-anything-platform-service`（需独立安装）
+- **睿锋平台登录与直连查询（自包含，仅需 Python3 + requests）：**
+  登录、后台产品搜索、产品详情、价格查询已内置于 `scripts/ruifeng_platform.py`，
+  **无需安装 CLI**。装好本 skill 即可：
+  ```bash
+  python scripts/ruifeng_platform.py config-use prod      # 选环境(test 需再 config-set --base-url)
+  python scripts/ruifeng_platform.py login --mobile <手机号>   # 密码交互输入，token 落盘
+  python scripts/ruifeng_platform.py search --keyword 90363-45050   # 后台搜索→productId
+  python scripts/ruifeng_platform.py price --product-id <ID> --json # 四个价格
+  ```
+  配置与 RayForm-CLI 共用 `~/.cli-anything-platform-service/config.json`，token 互通。
+  **登录态自愈：** 查询链路优先直连睿锋平台；任意查询遇到登录态失效
+  （HTTP 401/403，或 HTTP 200 但 `body.code=401` / `status=false` 且消息含「登录/token/失效/过期」）
+  时，**立即用已存账号密码自动重登一次并重试**，新 token 落盘复用，全程无需人工介入。
+  自动重登要求 `login` 时把密码写入配置（文件 `0o600` 仅本用户可读）；首次无 token 但已存凭据时也会自动登录。
+  如需更高安全性，`login --no-save-password` 可不落盘密码（此时失效需手动重新 `login`）。
+- **17vin EPC 查询（自包含，纯 HTTP，无需 CLI）：**
+  OE 互换 / 大厂关联件 / 适配车型已内置于 `scripts/vin17_epc.py`，仅需 Python3 + requests。
+  ```bash
+  python scripts/vin17_epc.py config-set --username <用户名>   # 密码交互输入，写入配置(0o600)
+  python scripts/vin17_epc.py oe --oe 31110-RAA-A01 --json     # 互换OE/品牌件/车型(三步链)
+  ```
+  凭据解析顺序：环境变量 `17VIN_USERNAME`/`17VIN_PASSWORD` → 配置 `vin17` 段（与睿锋共用 config.json）。
+  **不在分发的 skill 里硬编码账号。** 确保 `no_proxy` 包含 `api.17vin.com`。
+- **CLI 工具（可选，仅重流程需要）：** `cli-anything-platform-service` 仅用于
+  泰安联浏览器搜索(`oe-query`/`taianlian-search`，CDP)、报价匹配(`quote match`)等。
   ```bash
   pip install -e /path/to/cli-anything-platform-service[data-clean]
   ```
-- **Chrome CDP：** 部分工作流需要 Chrome 调试端口 9250（泰安联搜索）
-- **17vin API：** 设置环境变量 `17VIN_USERNAME` / `17VIN_PASSWORD`，并确保 `no_proxy` 包含 `api.17vin.com`
+- **Chrome CDP：** 仅泰安联 TecDoc 搜索需要 Chrome 调试端口 9250（17vin 已改为自包含 HTTP，不再需要）
 
 ---
 
@@ -58,8 +111,27 @@ Agent 执行数据治理任务时，严格遵循以下循环：
 | 客户报价单 (Excel) | `报价单.xlsx` | [quote-match](workflows/quote-match.md) |
 | 待校验产品清单 (Excel) | `产品清单.xlsx` | cross-validate（CLI 直接调用） |
 | 纯文本编号列表 | `DAC39720037, 45840045` | 按行拆分为多个 oe-lookup |
+| **图片**（轴承钢印照/包装盒/报价单截图等） | `bearing.jpg` / `quote.png` | **先经「图片输入预处理」识别出编号/OE，再按识别结果路由到上表对应工作流** |
 
 如输入类型无法识别，询问用户明确。
+
+#### 图片输入预处理（识别 → 编号 → 再查询）
+
+当输入是**图片格式**（`.jpg/.jpeg/.png/.webp/.bmp` 文件路径或图片 URL）时，**不可直接进入查询工作流**，必须先用 `qwen-vision` skill 把图片里的编号/OE/钢印文字识别出来，拿到文本编号后再回到上面的输入类型表正常路由。
+
+```bash
+# 封装命令：自动从个人配置取 SiliconFlow Key + 内置业务识别 prompt，再调 qwen-vision
+python scripts/recognize_image.py --image-path "<图片路径或URL>"            # 单件编号识别(默认 --mode oe)
+python scripts/recognize_image.py --image-path "<报价单图>" --mode quote     # 报价单逐行 OCR
+```
+> Key 取自 `personal_config`（首次配置已录入），无需手动 `export SILICONFLOW_API_KEY`。
+> 底层仍是 qwen-vision skill 的 `vision.py`，仅封装了取 Key + 业务 prompt。
+
+处理规则：
+1. **识别优先级**：实物钢印 OE > 包装盒印刷编号 > 截图文字。多个候选时全部列出，交由后续工作流按「编号选取优先级」（主机大厂 OE > 大厂关联编号 > 小厂）取舍。
+2. **拿到编号后**：把识别出的编号当作普通文本输入，按输入类型表重新判定（DAC→oe-lookup、OE→oe-lookup、报价单截图的多行→拆分多个 oe-lookup），执行后续多源查询/价格补充。
+3. **必须复述识别结果让用户确认**再继续查询——视觉识别可能误读字符（0/O、8/B、5/S），错号会污染整条链路。
+4. **失败处理**：未配置 SiliconFlow Key → 提示用户跑 `python scripts/personal_config.py init` 录入后重试；识别全模糊/无编号 → 请用户提供更清晰的图或直接文本编号，不强行查询。
 
 ### 2. Execute（执行工作流）
 
@@ -134,6 +206,10 @@ AI 训练知识在 OE 匹配中存在根本性错误（配件类型错误、发�
 ### 10. 防御性备注
 
 每次车型翻译后必须备注匹配前提："按 [具体年份/底盘号] [发动机] 匹配，不适用于 [易混淆的其他代数]"
+
+### 11. 命中睿锋平台数据必须补充价格
+
+凡查询命中睿锋后台产品（拿到 productId），输出必须带四个价格：**采购价**（`/api/product/findById`）、**OEM价格(P1)**、**品牌一级销售价(P2)**、**品牌二级销售价(P3)**（`/api/product/priceDetail`）。统一用 `scripts/product_price_query.py` 查询。报价匹配（quote-match）的 Excel 已自带 OEM价格/P1/P2/P3 列，仅需补采购价；OE 查询（oe-lookup）四价全补。价格为空显示 `—`，不阻断流程。
 
 ---
 
@@ -212,6 +288,28 @@ Agent 执行任何需要泰安联 TecDoc 的操作前，需确认 CDP 连接和�
 | 写入关联编号 | `data-clean num-save --product-id <ID> --num <OE>` |
 | 批量写入编号 | `data-clean num-batch-save --product-id <ID> --nums "列表"` |
 | 写入参数 | `data-clean param-save --product-id <ID> --name <名> --value <值>` |
+| 产品价格查询 | `python scripts/product_price_query.py --product-id <ID> --json` |
+
+### 自包含命令（无需 CLI，`scripts/ruifeng_platform.py`）
+
+| 操作 | 命令 |
+|------|------|
+| 选择环境 | `python scripts/ruifeng_platform.py config-use <test\|prod>` |
+| 登录(token落盘) | `python scripts/ruifeng_platform.py login --mobile <手机号>` |
+| 查看配置 | `python scripts/ruifeng_platform.py config-show` |
+| 后台产品搜索 | `python scripts/ruifeng_platform.py search --keyword <关键词> --json` |
+| 产品详情 | `python scripts/ruifeng_platform.py product --product-id <ID>` |
+| 价格查询(采购价/P1/P2/P3) | `python scripts/ruifeng_platform.py price --product-id <ID> --json` |
+
+### 自包含命令（无需 CLI，`scripts/vin17_epc.py`，17vin 纯 HTTP）
+
+| 操作 | 命令 |
+|------|------|
+| 配置凭据 | `python scripts/vin17_epc.py config-set --username <用户名>` |
+| 查看凭据状态 | `python scripts/vin17_epc.py config-show` |
+| OE 互换/品牌件/车型 | `python scripts/vin17_epc.py oe --oe <OE号> --json` |
+| OE 反查配件 | `python scripts/vin17_epc.py parts --oe <OE号> --json` |
+| 车型关键词搜索 | `python scripts/vin17_epc.py vehicle --keyword <车型> --json` |
 
 所有命令支持 `--json` 输出。认证：`config login` 登录获取 token。
 

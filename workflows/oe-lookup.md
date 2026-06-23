@@ -2,13 +2,14 @@
 
 ## 触发条件
 
-用户输入：OE 号 / 工厂编号(DAC/DU/RAH) / 尺寸规格 / 车型+配件名
+用户输入：OE 号 / 工厂编号(DAC/DU/RAH) / 尺寸规格 / 车型+配件名 / **图片**（轴承钢印照、包装盒、单个编号截图）
 
 **示例：**
 - `DAC39720037-2RZ(ABS88)` — 工厂编号
 - `45x84x45` — 尺寸规格
 - `31110-RAA-A01` — OE 号
 - `本田雅阁2.4L 涨紧轮` — 车型+配件名
+- `bearing.jpg` — 图片输入，先经 Step 0 识别出编号再查询
 
 ---
 
@@ -32,7 +33,7 @@
 | **轮毂单元编号** | 从后台取参数 → oe-query → verify |
 | **尺寸规格** | oe-query(dimensions) → backend-search → verify |
 | **OE/关联编号** | backend-search → backend-detail → cross-validate → verify |
-| **车型描述** | 行话翻译(查表) → oe-query → verify；--deep 时走 17vin CDP |
+| **车型描述** | 行话翻译(查表) → 17vin 车型搜索(自包含) / 泰安联 → verify |
 | **无法识别** | 询问用户明确输入类型 |
 
 ### Step 3: 数据源策略
@@ -49,6 +50,26 @@
 ---
 
 ## Execute：逐步执行
+
+### Step 0: 图片识别（仅图片输入）
+
+输入是图片（`.jpg/.jpeg/.png/.webp/.bmp` 路径或图片 URL）时，先用 `qwen-vision` skill 识别出编号，**不可跳过直接查询**：
+
+```bash
+# 自动从个人配置取 SiliconFlow Key + 内置编号识别 prompt
+python scripts/recognize_image.py --image-path "<图片路径或URL>"
+```
+
+**处理：**
+1. 解析识别出的编号文本，**复述给用户确认**（视觉易误读 0/O、8/B、5/S，错号会污染整链）。
+2. 把确认后的编号当普通文本输入，回到「Step 1 输入类型识别」正常路由：DAC/DU/RAH → Step 1 解析；OE/尺寸 → 跳过 Step 1 进 Step 2。
+3. 图中含多个编号 → 按「编号选取优先级」（主机大厂 OE > 大厂关联编号 > 小厂）选主编号查询，其余作为关联编号备用。
+
+**失败处理：**
+- 未配置 SiliconFlow Key → 提示用户 `python scripts/personal_config.py init` 录入后重试。
+- 识别结果全模糊 / 无可用编号 → 请用户提供更清晰图片或直接给文本编号，**不强行查询**。
+
+> 非图片输入直接从 Step 1 开始，本步跳过。
 
 ### Step 1: 工厂编号解析（仅工厂编号输入）
 
@@ -73,37 +94,37 @@ cli-anything-platform-service --json data-clean parse <编号>
 
 **失败处理：** `is_parsable: false` → 标记 "无法解析"，跳过 Step 2，直接进入 Step 3 用原始编号搜索后台。
 
-### Step 2: 多源 OE 查询
+### Step 2: 多源 OE 查询（17vin 自包含 + 泰安联 CLI）
 
+17vin 是纯 HTTP，已**自包含**（`scripts/vin17_epc.py`，无需 CLI）；泰安联是浏览器
+CDP 方式，仍走 CLI。两源同级并行，任一命中即可进 verify。
+
+**2a — 17vin（自包含，HTTP，OE 互换/品牌件/车型）：**
 ```bash
-# 一代轴承（DAC编码格式）
-cli-anything-platform-service --json data-clean oe-query --query "45840045"
-
-# 尺寸规格
-cli-anything-platform-service --json data-clean oe-query --query "45x84x45"
-
-# OE 号
-cli-anything-platform-service --json data-clean oe-query --query "31110-RAA-A01"
+python scripts/vin17_epc.py oe --oe "31110-RAA-A01" --json
 ```
-
-**输出：**
+输出：
 ```json
 {
-  "query": "45840045",
-  "input_type": "dac",
-  "tecalliance": [
-    {"brand": "TOYOTA", "oe": "90363-45050", "description": "..."}
-  ],
-  "17vin": [
-    {"brand": "TOYOTA", "oe": "90363-45050", "vehicle": "..."}
-  ],
-  "cache_hit": true
+  "oe": "31110-RAA-A01",
+  "oes": ["90363-45050"],              // 互换 OE
+  "brand_parts": ["SKF:BAH-0012"],     // 大厂关联编号（SKF/NSK/FAG/...）
+  "vehicles": ["Toyota Corolla 2003"]  // 适配车型
 }
+```
+> 17vin 互换接口以 **OE 号**为输入。DAC 编码/尺寸输入应先经 Step 1 解析或泰安联拿到 OE，再回喂本步。
+
+**2b — 泰安联（CLI，浏览器 CDP；DAC 编码/尺寸首选）：**
+```bash
+# 一代轴承 DAC 编码；--skip-17vin 因 17vin 已由 2a 自包含完成
+cli-anything-platform-service --json data-clean oe-query --query "45840045" --skip-17vin
+# 尺寸规格
+cli-anything-platform-service --json data-clean oe-query --query "45x84x45" --skip-17vin
 ```
 
 **失败处理：**
-- 泰安联不可达（CDP 9250 不通）→ 跳过，仅用 17vin
-- 17vin API 返回 503 → 检查 `no_proxy` 环境变量，重试
+- 泰安联不可达（CDP 9250 不通）→ 跳过 2b，仅用 17vin（2a）
+- 17vin API 返回 503 / 连接异常 → 检查 `no_proxy` 环境变量后重试；`vin17_epc.py` 内部已重试 2 次并优雅降级为空结果
 - 两源均无结果 → 进入电商兜底 (Step 4)
 
 ### Step 3: 后台已有记录查询
@@ -118,6 +139,29 @@ cli-anything-platform-service --json data-clean backend-search --keyword "90363-
 **输出：** 匹配到的产品列表，含 productId、code、oe、关联编号、参数。
 
 **失败处理：** 后台无匹配 → 标记 "需补充"，跳过。不阻断后续。
+
+### Step 3.5: 价格查询（仅当 Step 3 命中后台、拿到 productId 时）
+
+后台命中后，用 productId 查询睿锋平台价格。脚本直接集成后端两个接口
+（`/api/product/findById` 取采购价 + `/api/product/priceDetail` 取 P1/P2/P3），
+复用 CLI 的认证配置：
+
+```bash
+python scripts/product_price_query.py --product-id <productId> --json
+```
+
+**输出：**
+```json
+{
+  "productId": "123",
+  "purchasePrice": 18.5,   // 采购价
+  "p1Price": 32,           // OEM价格(P1)
+  "p2Price": 28,           // 品牌一级销售价(P2)
+  "p3Price": 25            // 品牌二级销售价(P3)
+}
+```
+
+**失败处理：** 接口报错 / 价格为空 → 该价格显示 `—`，不阻断后续。后台未命中（无 productId）→ 跳过本步。
 
 ### Step 4: 电商平台兜底（仅当 Step 2 两源全空时）
 
@@ -174,6 +218,13 @@ cli-anything-platform-service --json data-clean backend-search --keyword "90363-
 | 泰安联 | 90363-45050 | TOYOTA | Corolla 2003 | ✅ |
 | 17vin | 90363-45050 | TOYOTA | Corolla (E120) | ✅ |
 | 后台 | — | — | — | 未入库 |
+
+### 价格信息（后台命中时）
+| 采购价 | OEM价格(P1) | 品牌一级(P2) | 品牌二级(P3) |
+|--------|-------------|--------------|--------------|
+| 18.5 | 32 | 28 | 25 |
+
+> 后台未命中（无 productId）则省略本节。价格为空显示 `—`。
 
 ### 校验结论
 **置信度: B-待补充** — 泰安联与17vin一致，但后台未找到对应产品。

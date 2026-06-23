@@ -19,6 +19,9 @@
 | Excel (.xlsx/.xls) | 文件扩展名 | 读取全部 sheet，识别列语义 |
 | CSV/文本 | 逗号/换行分隔 | 按行拆分，识别每行类型 |
 | 单个编号/OE | 无分隔符的单行文本 | 降级为 oe-lookup 工作流 |
+| **图片**（报价单照片/截图） | 图片扩展名/URL | 先用 `qwen-vision` skill OCR 成结构化编号清单，复述确认后按下方文本流程继续 |
+
+**图片报价单预处理：** 调 `python scripts/recognize_image.py --image-path <图> --mode quote`（自动取个人配置里的 SiliconFlow Key + 内置报价单逐行 OCR prompt），把识别出的多行编号当作文本报价清单进入 Step 2 列识别。识别可能误读字符，**务必让用户核对后再批量查询**。未配置 Key 时先跑 `python scripts/personal_config.py init`。
 
 ### Step 2: 列语义识别（Excel 输入）
 
@@ -99,15 +102,30 @@ CLI 内部执行：
 4. 新编号命中 → **三方补查待写入** sheet（记录新OE+来源）
 5. 仍未命中 / CDP 不可达 → **待工厂确认** sheet（优雅降级，不中断）
 
----
+### Step 5: 采购价补查（命中行）
 
-## Verify：结果校验与输出
+报价接口返回的明细已带 **OEM价格 / P1 / P2 / P3**（`ProductAuditData` 字段），
+Excel 各 sheet 已含这些列。**唯一缺采购价**（报价接口不返回 `purchasePrice`）。
+
+对有 productId 的命中行（报价结果 / 待技术员分辨 / 三方补查待写入），批量补查采购价：
+
+```bash
+# 收集命中行的 productId，逗号分隔
+python scripts/product_price_query.py --product-ids <id1,id2,...> --json
+```
+
+脚本对每个 productId 调 `/api/product/findById` 取 `purchasePrice`（同时返回的
+P1/P2/P3 可与 Excel 既有列交叉核对）。把采购价回填到对应行的「采购价」列。
+
+**失败处理：** 某行查询失败 / 采购价为空 → 该单元格留空，不阻断整体。
 
 ### 四 Sheet 输出结构
 
+每个 sheet 均含价格列：**采购价**（Step 5 补查）、**售价**、**OEM价格**、**P1价格**、**P2价格**、**P3价格**（报价接口直接返回）。
+
 | Sheet | 内容 | 说明 |
 |-------|------|------|
-| **报价结果** | querySource∈{1,2,3,4,6,7} 且不重复的命中行 | 含 productId/名称/雷迪克code/价格/置信度 |
+| **报价结果** | querySource∈{1,2,3,4,6,7} 且不重复的命中行 | 含 productId/名称/雷迪克code/采购价/OEM价格/P1/P2/P3/置信度 |
 | **待技术员分辨** | querySource=5 或同一编号命中多行 | 相邻排列候选行，附库存数供比对 |
 | **三方补查待写入** | --deep 模式下新 OE 回查命中 | 新OE/来源/原始输入编号，供后续写入任务 |
 | **待工厂确认** | 全部未命中 / CDP 不可达时的降级行 | 仍无法匹配的编号/车型 |

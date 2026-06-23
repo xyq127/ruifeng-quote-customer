@@ -1,0 +1,17 @@
+{
+  "_说明": "个人配置示例。请勿把真实密钥提交进仓库。实际文件位于 ~/.cli-anything-platform-service/config.json（0o600），推荐用 `python scripts/personal_config.py init` 生成，而非手抄。token 由首次查询自动获取写入。",
+  "current_env": "prod",
+  "environments": {
+    "prod": {
+      "base_url": "https://rfscm.com/api/principal",
+      "mobile": "<睿锋登录手机号>",
+      "password": "<睿锋登录密码>"
+    }
+  },
+  "vin17": {
+    "api_base": "http://api.17vin.com:8080",
+    "username": "<17vin 用户名>",
+    "password": "<17vin 密码>"
+  },
+  "siliconflow_api_key": "<qwen-vision 的 SiliconFlow API Key，形如 sk-...>"
+}
