@@ -1,6 +1,6 @@
 ---
-name: 睿锋数据治理
-description: "睿锋智链汽车配件数据治理 — Plan → Execute → Verify 循环框架。覆盖数据获取（多源OE查询）、数据校验（三位一体交叉验证）、数据补充（缺失数据回写）。数据源优先级: 泰安联≈17vin > 电商平台。编号选取优先级: 主机大厂OE > 关联编号大厂 > 其他小厂。"
+name: 睿锋数据治理（客户版）
+description: "【客户版·面向客户，只展示售价 salePrice，不输出采购价/P1/P2/P3】睿锋智链汽车配件数据治理 — Plan → Execute → Verify 循环框架。覆盖数据获取（多源OE查询）、数据校验（三位一体交叉验证）、数据补充（缺失数据回写）。数据源优先级: 泰安联≈17vin > 电商平台。编号选取优先级: 主机大厂OE > 关联编号大厂 > 其他小厂。"
 version: 3.0.0
 author: Hermes Agent
 category: data-governance
@@ -16,7 +16,7 @@ depends_on:
   - 快速OE查询
 ---
 
-# 睿锋数据治理
+# 睿锋数据治理（客户版）
 
 ## 概述
 
