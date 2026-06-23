@@ -23,13 +23,13 @@
   config-use     切换当前环境 (test/prod)
   config-set     设置 base_url / token
   config-show    查看配置状态
-  price          按产品 ID 查询四个价格（采购价/P1/P2/P3）
+  price          按编号/OE 查询售价 salePrice（客户版，走 /inventory/list）
   product        按产品 ID 查询产品详情 (findById)
 
 用法示例:
   python ruifeng_platform.py config-use prod
   python ruifeng_platform.py login --mobile 13800000000
-  python ruifeng_platform.py price --product-id 123 --json
+  python ruifeng_platform.py price --keyword 30BG05S5G-2DST --json
 """
 
 import argparse
@@ -323,29 +323,35 @@ def query_search(client: RuifengClient, keyword: str, query_type="ENCODE",
     return data.get("content", data.get("records", []))
 
 
-def query_prices(client: RuifengClient, product_id: str) -> dict:
-    """查询单个产品的四个价格：采购价 + P1/P2/P3。"""
-    result = {"productId": product_id, "purchasePrice": None,
-              "p1Price": None, "p2Price": None, "p3Price": None, "errors": []}
+def query_sale_price(client: RuifengClient, keyword: str, product_id=None,
+                     query_type="ENCODE") -> dict:
+    """查询售价 salePrice（客户版，走 /inventory/list，keyword+queryType 检索）。
+
+    keyword 传编号/OE；命中多条时，给定 product_id 则优先取同一产品行，
+    否则取 content 第一条。仅返回售价，不暴露采购价 / P1 / P2 / P3。
+    """
+    result = {"keyword": keyword, "productId": product_id,
+              "salePrice": None, "errors": []}
     try:
-        detail = client.get("/api/product/findById", params={"id": product_id})
-        if detail.get("code") == 200 and isinstance(detail.get("data"), dict):
-            result["purchasePrice"] = _num(detail["data"].get("purchasePrice"))
+        resp = client.get("/api/principal/inventory/list", params={
+            "page": 1, "size": 10, "queryType": query_type, "keyword": keyword,
+        })
+        data = resp.get("data", {})
+        rows = data.get("content", data.get("records", [])) \
+            if isinstance(data, dict) else []
+        row = None
+        if product_id:
+            row = next((r for r in rows
+                        if str(r.get("id") or r.get("productId")) == str(product_id)), None)
+        if row is None and rows:
+            row = rows[0]
+        if row:
+            result["salePrice"] = _num(row.get("salePrice"))
+            result["productId"] = row.get("id") or row.get("productId") or product_id
         else:
-            result["errors"].append(f"findById: {detail.get('msg') or detail.get('code')}")
+            result["errors"].append("inventory/list: 无匹配库存记录")
     except Exception as exc:  # noqa: BLE001
-        result["errors"].append(f"findById: {exc}")
-    try:
-        price = client.get("/api/product/priceDetail", params={"productId": product_id})
-        if price.get("code") == 200 and isinstance(price.get("data"), dict):
-            d = price["data"]
-            result["p1Price"] = _num(d.get("p1Price"))
-            result["p2Price"] = _num(d.get("p2Price"))
-            result["p3Price"] = _num(d.get("p3Price"))
-        else:
-            result["errors"].append(f"priceDetail: {price.get('msg') or price.get('code')}")
-    except Exception as exc:  # noqa: BLE001
-        result["errors"].append(f"priceDetail: {exc}")
+        result["errors"].append(f"inventory/list: {exc}")
     if not result["errors"]:
         result.pop("errors")
     return result
@@ -430,23 +436,19 @@ def _require_login(client):
 def cmd_price(args):
     client = get_client()
     _require_login(client)
-    ids = [args.product_id] if args.product_id else \
-        [p.strip() for p in args.product_ids.split(",") if p.strip()]
-    rows = [query_prices(client, pid) for pid in ids]
+    kws = [args.keyword] if args.keyword else \
+        [k.strip() for k in args.keywords.split(",") if k.strip()]
+    rows = [query_sale_price(client, kw, product_id=args.product_id,
+                             query_type=args.query_type) for kw in kws]
     if args.json:
-        out = rows[0] if (args.product_id and len(rows) == 1) else {"results": rows}
+        out = rows[0] if (args.keyword and len(rows) == 1) else {"results": rows}
         print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
-        labels = [("采购价", "purchasePrice"), ("OEM价格(P1)", "p1Price"),
-                  ("品牌一级销售价(P2)", "p2Price"), ("品牌二级销售价(P3)", "p3Price")]
         for r in rows:
-            print(f"产品 {r['productId']} 价格:")
-            for name, key in labels:
-                v = r.get(key)
-                print(f"  {name}: {'—' if v is None else v}")
+            v = r.get("salePrice")
+            print(f"{r['keyword']} 售价: {'—' if v is None else v}")
             if r.get("errors"):
                 print(f"  ⚠️ {'; '.join(r['errors'])}")
-            print()
 
 
 def cmd_product(args):
@@ -500,10 +502,12 @@ def build_parser():
                    help="不在配置中保存密码（登录态失效后需手动重新 login，关闭自动重登）")
     s.set_defaults(func=cmd_login)
 
-    s = sub.add_parser("price", help="按产品 ID 查询四个价格")
+    s = sub.add_parser("price", help="按编号/OE 查询售价 salePrice（/inventory/list）")
     g = s.add_mutually_exclusive_group(required=True)
-    g.add_argument("--product-id")
-    g.add_argument("--product-ids", help="逗号分隔")
+    g.add_argument("--keyword")
+    g.add_argument("--keywords", help="逗号分隔")
+    s.add_argument("--product-id", help="可选：命中多条时优先匹配该产品行")
+    s.add_argument("--query-type", dest="query_type", default="ENCODE")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_price)
 

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""根据产品 ID 查询睿锋平台四个价格（采购价 / P1 / P2 / P3）。
+"""根据编号/OE 查询睿锋平台售价 salePrice（客户版，走 /inventory/list）。
 
 薄封装：复用本目录自包含模块 ruifeng_platform，无需安装 RayForm-CLI。
 等价于 `python ruifeng_platform.py price ...`，保留此入口便于向后兼容。
 
+客户版只暴露售价（salePrice），不输出采购价 / P1 / P2 / P3。
+
 用法:
-  python product_price_query.py --product-id 123 --json
-  python product_price_query.py --product-ids 123,456
+  python product_price_query.py --keyword 30BG05S5G-2DST --json
+  python product_price_query.py --keywords 30BG05S5G-2DST,DAC30600337
 """
 
 import argparse
@@ -15,19 +17,21 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ruifeng_platform import get_client, query_prices  # noqa: E402
+from ruifeng_platform import get_client, query_sale_price  # noqa: E402
 
 
 def main():
-    parser = argparse.ArgumentParser(description="根据产品 ID 查询睿锋平台四个价格")
+    parser = argparse.ArgumentParser(description="根据编号/OE 查询睿锋平台售价 salePrice")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--product-id", help="单个产品 ID")
-    group.add_argument("--product-ids", help="多个产品 ID，逗号分隔")
+    group.add_argument("--keyword", help="单个编号/OE")
+    group.add_argument("--keywords", help="多个编号/OE，逗号分隔")
+    parser.add_argument("--product-id", help="可选：命中多条时优先匹配该产品行")
+    parser.add_argument("--query-type", dest="query_type", default="ENCODE")
     parser.add_argument("--json", action="store_true", help="JSON 输出")
     args = parser.parse_args()
 
-    ids = [args.product_id.strip()] if args.product_id else \
-        [p.strip() for p in args.product_ids.split(",") if p.strip()]
+    kws = [args.keyword.strip()] if args.keyword else \
+        [k.strip() for k in args.keywords.split(",") if k.strip()]
 
     try:
         client = get_client()
@@ -35,22 +39,18 @@ def main():
         sys.exit(str(exc))
     if not client.token:
         sys.exit("未登录或 token 缺失，请先执行：python ruifeng_platform.py login --mobile <手机号>")
-    rows = [query_prices(client, pid) for pid in ids]
+    rows = [query_sale_price(client, kw, product_id=args.product_id,
+                             query_type=args.query_type) for kw in kws]
 
     if args.json:
-        out = rows[0] if (args.product_id and len(rows) == 1) else {"results": rows}
+        out = rows[0] if (args.keyword and len(rows) == 1) else {"results": rows}
         print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
-        labels = [("采购价", "purchasePrice"), ("OEM价格(P1)", "p1Price"),
-                  ("品牌一级销售价(P2)", "p2Price"), ("品牌二级销售价(P3)", "p3Price")]
         for r in rows:
-            print(f"产品 {r['productId']} 价格:")
-            for name, key in labels:
-                v = r.get(key)
-                print(f"  {name}: {'—' if v is None else v}")
+            v = r.get("salePrice")
+            print(f"{r['keyword']} 售价: {'—' if v is None else v}")
             if r.get("errors"):
                 print(f"  ⚠️ {'; '.join(r['errors'])}")
-            print()
 
 
 if __name__ == "__main__":

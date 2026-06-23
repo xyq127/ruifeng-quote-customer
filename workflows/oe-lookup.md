@@ -140,28 +140,27 @@ cli-anything-platform-service --json data-clean backend-search --keyword "90363-
 
 **失败处理：** 后台无匹配 → 标记 "需补充"，跳过。不阻断后续。
 
-### Step 3.5: 价格查询（仅当 Step 3 命中后台、拿到 productId 时）
+### Step 3.5: 售价查询（客户版，仅当 Step 3 命中后台时）
 
-后台命中后，用 productId 查询睿锋平台价格。脚本直接集成后端两个接口
-（`/api/product/findById` 取采购价 + `/api/product/priceDetail` 取 P1/P2/P3），
-复用 CLI 的认证配置：
+> 客户版只给客户看 **售价 salePrice**，不输出采购价 / P1 / P2 / P3。
+
+后台命中后，用本次查询的编号/OE 走 `/inventory/list`（`queryType=ENCODE`，取
+`data.content[].salePrice`）查售价，复用同一份认证配置：
 
 ```bash
-python scripts/product_price_query.py --product-id <productId> --json
+python scripts/product_price_query.py --keyword <编号/OE> --json
 ```
 
 **输出：**
 ```json
 {
+  "keyword": "90363-45050",
   "productId": "123",
-  "purchasePrice": 18.5,   // 采购价
-  "p1Price": 32,           // OEM价格(P1)
-  "p2Price": 28,           // 品牌一级销售价(P2)
-  "p3Price": 25            // 品牌二级销售价(P3)
+  "salePrice": 36        // 售价 salePrice
 }
 ```
 
-**失败处理：** 接口报错 / 价格为空 → 该价格显示 `—`，不阻断后续。后台未命中（无 productId）→ 跳过本步。
+**失败处理：** 接口报错 / 售价为空 / 库存无记录 → 售价显示 `—`，不阻断后续。后台未命中 → 跳过本步。
 
 ### Step 4: 电商平台兜底（仅当 Step 2 两源全空时）
 
@@ -219,12 +218,12 @@ python scripts/product_price_query.py --product-id <productId> --json
 | 17vin | 90363-45050 | TOYOTA | Corolla (E120) | ✅ |
 | 后台 | — | — | — | 未入库 |
 
-### 价格信息（后台命中时）
-| 采购价 | OEM价格(P1) | 品牌一级(P2) | 品牌二级(P3) |
-|--------|-------------|--------------|--------------|
-| 18.5 | 32 | 28 | 25 |
+### 售价信息（后台命中时）
+| 售价 |
+|------|
+| 36 |
 
-> 后台未命中（无 productId）则省略本节。价格为空显示 `—`。
+> 后台未命中则省略本节。售价为空显示 `—`。客户版仅展示售价 salePrice。
 
 ### 校验结论
 **置信度: B-待补充** — 泰安联与17vin一致，但后台未找到对应产品。

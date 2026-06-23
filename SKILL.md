@@ -61,7 +61,7 @@ python scripts/personal_config.py check --feature qwen  # 只查图片识别所�
   python scripts/ruifeng_platform.py config-use prod      # 选环境(test 需再 config-set --base-url)
   python scripts/ruifeng_platform.py login --mobile <手机号>   # 密码交互输入，token 落盘
   python scripts/ruifeng_platform.py search --keyword 90363-45050   # 后台搜索→productId
-  python scripts/ruifeng_platform.py price --product-id <ID> --json # 四个价格
+  python scripts/ruifeng_platform.py price --keyword 90363-45050 --json # 售价 salePrice
   ```
   配置与 RayForm-CLI 共用 `~/.cli-anything-platform-service/config.json`，token 互通。
   **登录态自愈：** 查询链路优先直连睿锋平台；任意查询遇到登录态失效
@@ -207,9 +207,11 @@ AI 训练知识在 OE 匹配中存在根本性错误（配件类型错误、发�
 
 每次车型翻译后必须备注匹配前提："按 [具体年份/底盘号] [发动机] 匹配，不适用于 [易混淆的其他代数]"
 
-### 11. 命中睿锋平台数据必须补充价格
+### 11. 命中睿锋平台数据必须补充售价（客户版）
 
-凡查询命中睿锋后台产品（拿到 productId），输出必须带四个价格：**采购价**（`/api/product/findById`）、**OEM价格(P1)**、**品牌一级销售价(P2)**、**品牌二级销售价(P3)**（`/api/product/priceDetail`）。统一用 `scripts/product_price_query.py` 查询。报价匹配（quote-match）的 Excel 已自带 OEM价格/P1/P2/P3 列，仅需补采购价；OE 查询（oe-lookup）四价全补。价格为空显示 `—`，不阻断流程。
+> **客户版 skill：只对客户暴露售价 `salePrice`，不输出采购价 / P1 / P2 / P3。**
+
+凡查询命中睿锋后台产品，输出必须带 **售价（salePrice）**，走 **`/inventory/list`**（`keyword`=编号/OE + `queryType=ENCODE`，取 `data.content[].salePrice`）。统一用 `scripts/product_price_query.py --keyword <编号/OE>` 查询。oe-lookup 与 quote-match 均只补这一个售价列。价格为空显示 `—`，不阻断流程。
 
 ---
 
@@ -288,7 +290,7 @@ Agent 执行任何需要泰安联 TecDoc 的操作前，需确认 CDP 连接和�
 | 写入关联编号 | `data-clean num-save --product-id <ID> --num <OE>` |
 | 批量写入编号 | `data-clean num-batch-save --product-id <ID> --nums "列表"` |
 | 写入参数 | `data-clean param-save --product-id <ID> --name <名> --value <值>` |
-| 产品价格查询 | `python scripts/product_price_query.py --product-id <ID> --json` |
+| 售价查询(salePrice) | `python scripts/product_price_query.py --keyword <编号/OE> --json` |
 
 ### 自包含命令（无需 CLI，`scripts/ruifeng_platform.py`）
 
@@ -299,7 +301,7 @@ Agent 执行任何需要泰安联 TecDoc 的操作前，需确认 CDP 连接和�
 | 查看配置 | `python scripts/ruifeng_platform.py config-show` |
 | 后台产品搜索 | `python scripts/ruifeng_platform.py search --keyword <关键词> --json` |
 | 产品详情 | `python scripts/ruifeng_platform.py product --product-id <ID>` |
-| 价格查询(采购价/P1/P2/P3) | `python scripts/ruifeng_platform.py price --product-id <ID> --json` |
+| 售价查询(salePrice/inventory) | `python scripts/ruifeng_platform.py price --keyword <编号/OE> --json` |
 
 ### 自包含命令（无需 CLI，`scripts/vin17_epc.py`，17vin 纯 HTTP）
 

@@ -102,30 +102,26 @@ CLI 内部执行：
 4. 新编号命中 → **三方补查待写入** sheet（记录新OE+来源）
 5. 仍未命中 / CDP 不可达 → **待工厂确认** sheet（优雅降级，不中断）
 
-### Step 5: 采购价补查（命中行）
+### Step 5: 售价已随报价接口返回（客户版无需补查）
 
-报价接口返回的明细已带 **OEM价格 / P1 / P2 / P3**（`ProductAuditData` 字段），
-Excel 各 sheet 已含这些列。**唯一缺采购价**（报价接口不返回 `purchasePrice`）。
+> 客户版只对客户展示 **售价 salePrice**；采购价 / OEM价格 / P1 / P2 / P3 一律不输出。
 
-对有 productId 的命中行（报价结果 / 待技术员分辨 / 三方补查待写入），批量补查采购价：
+报价接口返回的明细已直接带 **售价** 列，无需再补查采购价。如需对单个编号单独核对售价，
+走 `/inventory/list`（`queryType=ENCODE`，取 `data.content[].salePrice`）：
 
 ```bash
-# 收集命中行的 productId，逗号分隔
-python scripts/product_price_query.py --product-ids <id1,id2,...> --json
+python scripts/product_price_query.py --keyword <编号/OE> --json
 ```
 
-脚本对每个 productId 调 `/api/product/findById` 取 `purchasePrice`（同时返回的
-P1/P2/P3 可与 Excel 既有列交叉核对）。把采购价回填到对应行的「采购价」列。
-
-**失败处理：** 某行查询失败 / 采购价为空 → 该单元格留空，不阻断整体。
+**失败处理：** 售价为空 → 该单元格留空，不阻断整体。
 
 ### 四 Sheet 输出结构
 
-每个 sheet 均含价格列：**采购价**（Step 5 补查）、**售价**、**OEM价格**、**P1价格**、**P2价格**、**P3价格**（报价接口直接返回）。
+每个 sheet 仅含 **售价（salePrice）** 一个价格列；采购价 / OEM价格 / P1 / P2 / P3 客户版不输出。
 
 | Sheet | 内容 | 说明 |
 |-------|------|------|
-| **报价结果** | querySource∈{1,2,3,4,6,7} 且不重复的命中行 | 含 productId/名称/雷迪克code/采购价/OEM价格/P1/P2/P3/置信度 |
+| **报价结果** | querySource∈{1,2,3,4,6,7} 且不重复的命中行 | 含 productId/名称/雷迪克code/售价/置信度 |
 | **待技术员分辨** | querySource=5 或同一编号命中多行 | 相邻排列候选行，附库存数供比对 |
 | **三方补查待写入** | --deep 模式下新 OE 回查命中 | 新OE/来源/原始输入编号，供后续写入任务 |
 | **待工厂确认** | 全部未命中 / CDP 不可达时的降级行 | 仍无法匹配的编号/车型 |
