@@ -12,6 +12,5 @@
     "api_base": "http://api.17vin.com:8080",
     "username": "<17vin 用户名>",
     "password": "<17vin 密码>"
-  },
-  "siliconflow_api_key": "<qwen-vision 的 SiliconFlow API Key，形如 sk-...>"
+  }
 }

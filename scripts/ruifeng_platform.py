@@ -67,8 +67,7 @@ def first_run_hint(missing: str = "") -> str:
         f"⚠️ 首次使用，需要先配置个人凭据{need}。\n"
         "请在【你自己的终端】运行配置向导（密码用安全输入，不经过 Agent / 命令行历史）：\n"
         "  python scripts/personal_config.py init\n"
-        "向导会引导录入：① 睿锋登录手机号 + 密码  ② 17vin 用户名 + 密码  "
-        "③ qwen-vision 的 SiliconFlow API Key\n"
+        "向导会引导录入：① 睿锋登录手机号 + 密码  ② 17vin 用户名 + 密码\n"
         f"凭据仅写入本机 {CONFIG_FILE}（权限 0o600，不随 skill 分发）。"
     )
 

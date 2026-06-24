@@ -19,9 +19,9 @@
 | Excel (.xlsx/.xls) | 文件扩展名 | 读取全部 sheet，识别列语义 |
 | CSV/文本 | 逗号/换行分隔 | 按行拆分，识别每行类型 |
 | 单个编号/OE | 无分隔符的单行文本 | 降级为 oe-lookup 工作流 |
-| **图片**（报价单照片/截图） | 图片扩展名/URL | 先用 `qwen-vision` skill OCR 成结构化编号清单，复述确认后按下方文本流程继续 |
+| **图片**（报价单照片/截图） | 图片扩展名/URL | Agent 用自身视觉读成结构化编号清单，复述确认后按下方文本流程继续 |
 
-**图片报价单预处理：** 调 `python scripts/recognize_image.py --image-path <图> --mode quote`（自动取个人配置里的 SiliconFlow Key + 内置报价单逐行 OCR prompt），把识别出的多行编号当作文本报价清单进入 Step 2 列识别。识别可能误读字符，**务必让用户核对后再批量查询**。未配置 Key 时先跑 `python scripts/personal_config.py init`。
+**图片报价单预处理（客户版零配置）：** Agent 直接用 Read 工具打开报价单图片，用自身视觉逐行读出编号，整理成文本报价清单进入 Step 2 列识别——无需 SiliconFlow Key、无需识别脚本。图片 URL 先下载到本地再 Read。视觉读图可能误读字符，**务必让用户核对后再批量查询**。
 
 ### Step 2: 列语义识别（Excel 输入）
 

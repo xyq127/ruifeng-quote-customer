@@ -7,7 +7,8 @@
 
   - 睿锋平台：登录手机号 + 密码（+ 环境/base_url）   → ruifeng_platform.py 使用
   - 17vin   ：用户名 + 密码                          → vin17_epc.py 使用
-  - qwen-vision：SiliconFlow API Key                 → recognize_image.py 使用
+
+（客户版无需图片识别 Key —— 图片由 Agent 自身视觉直接读取。）
 
 密钥全部由用户在交互式提示中输入（密码用 getpass，不进命令行/历史），
 配置文件**不随 skill 分发**——它在用户 $HOME 下，npm 安装/重装不会覆盖它。
@@ -16,13 +17,13 @@
   init    交互式向导，集中录入所有个人凭据（已存在的项可回车跳过保留）
   check   首次运行检测：各功能凭据是否就绪；缺项时打印录入提示并以退出码 2 返回
   show    查看配置状态（密码/Key 打码）
-  get     输出单个值到 stdout（供 shell 注入，如 SILICONFLOW_API_KEY）
+  get     输出单个值到 stdout（供 shell 注入，如 vin17_username）
   set     非交互设置单个值（用于脚本化；密码类建议仍用 init）
 
 用法示例:
   python personal_config.py init
   python personal_config.py show
-  python personal_config.py get siliconflow_api_key
+  python personal_config.py get vin17_username
 """
 
 import argparse
@@ -36,17 +37,10 @@ from ruifeng_platform import (  # noqa: E402
     resolve_base_url, _current_env, _env_cfg, first_run_hint,
 )
 
-SILICONFLOW_KEY = "siliconflow_api_key"
 VIN17_DEFAULT_API = "http://api.17vin.com:8080"
 
 
 # ── 取值（供其他脚本 import） ─────────────────────────────────────────
-
-def get_siliconflow_key(cfg=None):
-    """qwen-vision 的 Key：环境变量优先，其次个人配置文件。"""
-    cfg = load_config() if cfg is None else cfg
-    return os.environ.get("SILICONFLOW_API_KEY") or cfg.get(SILICONFLOW_KEY)
-
 
 def _mask(v):
     if not v:
@@ -101,12 +95,6 @@ def cmd_init(args):
     if vpwd:
         v["password"] = vpwd
 
-    # 3) qwen-vision
-    print("\n— qwen-vision（SiliconFlow）—")
-    key = _prompt_keep("SiliconFlow API Key (sk-...)", cfg.get(SILICONFLOW_KEY), secret=True)
-    if key:
-        cfg[SILICONFLOW_KEY] = key
-
     save_config(cfg)
     print(f"\n✅ 已写入 {CONFIG_FILE}（权限 0o600）。可用 `show` 查看状态。")
 
@@ -125,18 +113,16 @@ def cmd_show(args):
     v = cfg.get("vin17", {}) if isinstance(cfg.get("vin17"), dict) else {}
     print(f"   17vin api_base={v.get('api_base') or VIN17_DEFAULT_API} "
           f"用户名={v.get('username') or '(未设置)'} 密码={_mask(v.get('password'))}")
-    print(f"   qwen-vision SiliconFlow Key={_mask(get_siliconflow_key(cfg))}")
 
 
 _FEATURE_LABELS = {
     "ruifeng": "睿锋登录（手机号 + 密码）",
     "vin17": "17vin（用户名 + 密码）",
-    "qwen": "qwen-vision（SiliconFlow API Key）",
 }
 
 
 def feature_status(cfg) -> dict:
-    """各功能凭据是否就绪：ruifeng / vin17 / qwen。"""
+    """各功能凭据是否就绪：ruifeng / vin17。"""
     env = _current_env(cfg)
     ec = cfg.get("environments", {}).get(env, {}) if env else {}
     v = cfg.get("vin17", {}) if isinstance(cfg.get("vin17"), dict) else {}
@@ -144,7 +130,6 @@ def feature_status(cfg) -> dict:
         # 睿锋：有手机号 + (密码或已存 token) 即可发起查询
         "ruifeng": bool(ec.get("mobile") and (ec.get("password") or ec.get("token"))),
         "vin17": bool(v.get("username") and v.get("password")),
-        "qwen": bool(get_siliconflow_key(cfg)),
     }
 
 
@@ -164,7 +149,6 @@ def cmd_check(args):
 
 # get/set 支持的扁平键 → 配置中的实际位置
 _FLAT_KEYS = {
-    "siliconflow_api_key": ("root", SILICONFLOW_KEY),
     "vin17_username": ("vin17", "username"),
     "vin17_password": ("vin17", "password"),
     "vin17_api_base": ("vin17", "api_base"),
@@ -191,12 +175,8 @@ def _resolve_slot(cfg, key, create=False):
 
 def cmd_get(args):
     cfg = load_config()
-    # siliconflow 走带环境变量回退的取值，便于 shell 注入
-    if args.key == "siliconflow_api_key":
-        val = get_siliconflow_key(cfg)
-    else:
-        slot, name = _resolve_slot(cfg, args.key)
-        val = (slot or {}).get(name)
+    slot, name = _resolve_slot(cfg, args.key)
+    val = (slot or {}).get(name)
     if not val:
         sys.exit(1)  # 无值：非零退出，便于 shell 判断
     sys.stdout.write(val)
@@ -211,7 +191,7 @@ def cmd_set(args):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(description="个人配置统管（睿锋 / 17vin / qwen-vision 一处录入）")
+    p = argparse.ArgumentParser(description="个人配置统管（睿锋 / 17vin 一处录入）")
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("init", help="交互式录入所有个人凭据")

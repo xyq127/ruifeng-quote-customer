@@ -24,7 +24,7 @@ depends_on:
 
 ## 首次配置（每用户一次）
 
-每个用户首次使用前，跑一次配置向导，把**所有个人凭据集中录入一份个人配置文件**——睿锋登录手机号+密码、17vin 用户名+密码、qwen-vision 的 SiliconFlow API Key 一处搞定：
+每个用户首次使用前，跑一次配置向导，把**所有个人凭据集中录入一份个人配置文件**——睿锋登录手机号+密码、17vin 用户名+密码一处搞定（客户版**无需任何图片识别 Key**，图片由 Agent 自身视觉直接读取）：
 
 ```bash
 python scripts/personal_config.py init     # 交互式录入（密码用 getpass，不进命令行历史）
@@ -33,7 +33,7 @@ python scripts/personal_config.py show      # 查看状态（密码/Key 自动�
 
 - **存储位置**：`~/.cli-anything-platform-service/config.json`（权限 `0o600` 仅本人可读；`RUIFENG_CONFIG` 可改路径）。与睿锋/17vin 自包含模块、RayForm-CLI **共用同一文件**，token 互通。
 - **不随 skill 分发**：该文件在用户 `$HOME` 下，`npm install` 重装 skill **不会覆盖或读取它**；仓库内只有无密钥的模板 `scripts/config.example.json` 供参考。
-- 所有自包含脚本（`ruifeng_platform.py` / `vin17_epc.py` / `recognize_image.py`）都从这份配置读凭据；环境变量（`SILICONFLOW_API_KEY`、`17VIN_*`、`PLATFORM_*`）始终可临时覆盖。
+- 所有自包含脚本（`ruifeng_platform.py` / `vin17_epc.py`）都从这份配置读凭据；环境变量（`17VIN_*`、`PLATFORM_*`）始终可临时覆盖。
 
 ### 首次运行检测（Agent 必读，执行任何查询前先做）
 
@@ -41,13 +41,13 @@ python scripts/personal_config.py show      # 查看状态（密码/Key 自动�
 
 ```bash
 python scripts/personal_config.py check                 # 全部功能；退出码 0=就绪, 2=首次运行/缺项
-python scripts/personal_config.py check --feature qwen  # 只查图片识别所需 Key（按本次任务需要）
+python scripts/personal_config.py check --feature ruifeng  # 只查睿锋登录（按本次任务需要）
 ```
 
 - **退出码 0** → 配置就绪，正常执行。
 - **退出码 2（首次运行 / 缺项）→ 不要尝试查询。** 把脚本输出的「缺少项」清单**转达给用户**，并请用户**在自己的终端**运行 `python scripts/personal_config.py init` 录入这些信息。
-  - 密码/Key 用 `getpass` 安全输入，**不要让用户把密码发给 Agent**，也不要由 Agent 代填（避免进入对话/命令行历史）。
-  - 用户也可临时用环境变量提供（`SILICONFLOW_API_KEY` / `17VIN_*` / `PLATFORM_*`）。
+  - 密码用 `getpass` 安全输入，**不要让用户把密码发给 Agent**，也不要由 Agent 代填（避免进入对话/命令行历史）。
+  - 用户也可临时用环境变量提供（`17VIN_*` / `PLATFORM_*`）。
   - 配置完成后再继续原任务。
 
 > 任一自包含脚本在凭据缺失时也会自行打印同样的首次运行提示并非零退出——Agent 看到该提示即按上述方式引导用户，不要反复重试。
@@ -111,27 +111,21 @@ Agent 执行数据治理任务时，严格遵循以下循环：
 | 客户报价单 (Excel) | `报价单.xlsx` | [quote-match](workflows/quote-match.md) |
 | 待校验产品清单 (Excel) | `产品清单.xlsx` | cross-validate（CLI 直接调用） |
 | 纯文本编号列表 | `DAC39720037, 45840045` | 按行拆分为多个 oe-lookup |
-| **图片**（轴承钢印照/包装盒/报价单截图等） | `bearing.jpg` / `quote.png` | **先经「图片输入预处理」识别出编号/OE，再按识别结果路由到上表对应工作流** |
+| **图片**（轴承钢印照/包装盒/报价单截图等） | `bearing.jpg` / `quote.png` | **先经「图片输入预处理」读出编号/OE，再按识别结果路由到上表对应工作流** |
 
 如输入类型无法识别，询问用户明确。
 
-#### 图片输入预处理（识别 → 编号 → 再查询）
+#### 图片输入预处理（读图 → 编号 → 再查询）
 
-当输入是**图片格式**（`.jpg/.jpeg/.png/.webp/.bmp` 文件路径或图片 URL）时，**不可直接进入查询工作流**，必须先用 `qwen-vision` skill 把图片里的编号/OE/钢印文字识别出来，拿到文本编号后再回到上面的输入类型表正常路由。
+当输入是**图片格式**（`.jpg/.jpeg/.png/.webp/.bmp` 文件路径或图片 URL）时，**不可直接进入查询工作流**，必须先把图片里的编号/OE/钢印文字读出来，拿到文本编号后再回到上面的输入类型表正常路由。
 
-```bash
-# 封装命令：自动从个人配置取 SiliconFlow Key + 内置业务识别 prompt，再调 qwen-vision
-python scripts/recognize_image.py --image-path "<图片路径或URL>"            # 单件编号识别(默认 --mode oe)
-python scripts/recognize_image.py --image-path "<报价单图>" --mode quote     # 报价单逐行 OCR
-```
-> Key 取自 `personal_config`（首次配置已录入），无需手动 `export SILICONFLOW_API_KEY`。
-> 底层仍是 qwen-vision skill 的 `vision.py`，仅封装了取 Key + 业务 prompt。
+> **客户版简化：Agent 直接用自身视觉读图，零配置、无需任何 Key。** 用 Read 工具打开图片路径即可看到内容，无需调用外部识别脚本或 SiliconFlow API。本地图片直接传路径；图片 URL 先下载到本地再用 Read 打开。
 
-处理规则：
+读图要点：
 1. **识别优先级**：实物钢印 OE > 包装盒印刷编号 > 截图文字。多个候选时全部列出，交由后续工作流按「编号选取优先级」（主机大厂 OE > 大厂关联编号 > 小厂）取舍。
-2. **拿到编号后**：把识别出的编号当作普通文本输入，按输入类型表重新判定（DAC→oe-lookup、OE→oe-lookup、报价单截图的多行→拆分多个 oe-lookup），执行后续多源查询/价格补充。
-3. **必须复述识别结果让用户确认**再继续查询——视觉识别可能误读字符（0/O、8/B、5/S），错号会污染整条链路。
-4. **失败处理**：未配置 SiliconFlow Key → 提示用户跑 `python scripts/personal_config.py init` 录入后重试；识别全模糊/无编号 → 请用户提供更清晰的图或直接文本编号，不强行查询。
+2. **拿到编号后**：把读出的编号当作普通文本输入，按输入类型表重新判定（DAC→oe-lookup、OE→oe-lookup、报价单截图的多行→逐行拆分为多个 oe-lookup），执行后续多源查询/价格补充。
+3. **必须复述识别结果让用户确认**再继续查询——视觉读图可能误读字符（0/O、8/B、5/S），错号会污染整条链路。
+4. **失败处理**：图片全模糊/无编号 → 请用户提供更清晰的图或直接给文本编号，不强行查询。
 
 ### 2. Execute（执行工作流）
 
