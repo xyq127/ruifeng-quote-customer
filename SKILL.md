@@ -1,10 +1,11 @@
 ---
 name: 睿锋-客户询价
-description: "【客户版·面向客户，只展示售价 salePrice，不输出采购价/P1/P2/P3】睿锋智链汽车配件数据治理 — Plan → Execute → Verify 循环框架。覆盖数据获取（多源OE查询）、数据校验（三位一体交叉验证）、数据补充（缺失数据回写）。数据源优先级: 泰安联≈17vin > 电商平台。编号选取优先级: 主机大厂OE > 关联编号大厂 > 其他小厂。"
-version: 3.0.0
+description: "【客户版·面向客户，只展示售价 salePrice，绝不输出采购价/P1/P2/P3，区别于输出全价的内部版】睿锋-客户询价：汽车配件 OE/工厂编号(DAC/DU/RAH)/尺寸/车型配件/客户报价单 → 多源查询+交叉验证 → 命中睿锋后台后只补对客售价 salePrice。当面向客户做询价、对外报价、查某编号或车型配件的对客售价、给客户报价单批量匹配售价时使用，即使没明说『客户询价』也应触发。只读，不回写后台。遵循 Plan→Execute→Verify：数据源优先级 泰安联≈17vin > 睿锋后台 > 电商(需3家店铺一致)；编号选取 主机大厂OE > 大厂关联编号(SKF/NSK/FAG) > 其他小厂。"
+version: 3.1.0
 author: Hermes Agent
-category: data-governance
+category: quote-customer
 changelog: |
+  3.1.0 (2026-06-25): 客户版重定位 — 从「数据治理」收敛为「客户询价（只读+只报售价）」；移除全部回写/治理内容（num-save/param-save/cross-validate、置信度的可回写措辞）；精简依赖段与重复表格
   3.0.0 (2026-06-17): 架构重构 — Plan→Execute→Verify 循环框架；CLI 拆分为独立仓库 cli-anything-platform-service；新增 workflows/ 目录定义核心工作流；项目更名为「睿锋数据治理」
   2.2.0 (2026-06-15): 跨平台改造（自管 Chrome + Python 环境自动检测）；新增 CDP 连接与登录引导流程；新增子技能"快速OE查询"
   2.1.0 (2026-06-13): 新增产品报价核心链路 quote-match；地基改进：backend-search 归一化多轮重试链
@@ -20,7 +21,9 @@ depends_on:
 
 ## 概述
 
-睿锋智链汽车配件数据治理技能，对配件数据进行**获取 → 校验 → 补充**的完整闭环处理。核心目标是确认"工厂编号 ↔ OE ↔ 车型"三位一体映射的准确性。
+面向**客户**的汽车配件询价技能：对客户给出的编号 / OE / 尺寸 / 车型配件 / 报价单做**查询 → 多源交叉验证 → 输出含对客售价的报价**。核心目标是确认"工厂编号 ↔ OE ↔ 车型"三位一体映射准确，并给出可信的**对客售价（salePrice）**。
+
+> **这是只读的客户版**：只对客户暴露售价 `salePrice`，**绝不输出采购价 / P1 / P2 / P3**，也**不回写后台**（写关联编号/参数、交叉验证回写属内部版职责，本版不做）。需要看全价或回写时请用内部版「睿锋-内部询价」。
 
 ## 首次配置（每用户一次）
 
@@ -54,41 +57,32 @@ python scripts/personal_config.py check --feature ruifeng  # 只查睿锋登录�
 
 ## 依赖
 
-- **睿锋平台登录与直连查询（自包含，仅需 Python3 + requests）：**
-  登录、后台产品搜索、产品详情、价格查询已内置于 `scripts/ruifeng_platform.py`，
-  **无需安装 CLI**。装好本 skill 即可：
+绝大多数询价只需 **Python3 + requests** 的两个自包含脚本，**无需安装 CLI**：
+
+- **睿锋平台（`scripts/ruifeng_platform.py`）：** 登录、后台搜索、产品详情、售价查询。
   ```bash
-  python scripts/ruifeng_platform.py config-use prod      # 选环境(test 需再 config-set --base-url)
+  python scripts/ruifeng_platform.py config-use prod          # 选环境
   python scripts/ruifeng_platform.py login --mobile <手机号>   # 密码交互输入，token 落盘
-  python scripts/ruifeng_platform.py search --keyword 90363-45050   # 后台搜索→productId
-  python scripts/ruifeng_platform.py price --keyword 90363-45050 --json # 售价 salePrice
+  python scripts/ruifeng_platform.py price --keyword 90363-45050 --json  # 对客售价 salePrice
   ```
-  配置与 RayForm-CLI 共用 `~/.cli-anything-platform-service/config.json`，token 互通。
-  **登录态自愈：** 查询链路优先直连睿锋平台；任意查询遇到登录态失效
-  （HTTP 401/403，或 HTTP 200 但 `body.code=401` / `status=false` 且消息含「登录/token/失效/过期」）
-  时，**立即用已存账号密码自动重登一次并重试**，新 token 落盘复用，全程无需人工介入。
-  自动重登要求 `login` 时把密码写入配置（文件 `0o600` 仅本用户可读）；首次无 token 但已存凭据时也会自动登录。
-  如需更高安全性，`login --no-save-password` 可不落盘密码（此时失效需手动重新 `login`）。
-- **17vin EPC 查询（自包含，纯 HTTP，无需 CLI）：**
-  OE 互换 / 大厂关联件 / 适配车型已内置于 `scripts/vin17_epc.py`，仅需 Python3 + requests。
+  **登录态自愈**：查询遇 401/403 或 `body.code=401`/`status=false` 且消息含「登录/token/失效/过期」时，自动用已存凭据重登一次并重试，新 token 落盘，无需人工介入（需 `login` 时落盘密码；`--no-save-password` 可不落盘，失效则需手动重登）。
+- **17vin EPC（`scripts/vin17_epc.py`）：** OE 互换 / 大厂关联件 / 适配车型，纯 HTTP。
   ```bash
-  python scripts/vin17_epc.py config-set --username <用户名>   # 密码交互输入，写入配置(0o600)
+  python scripts/vin17_epc.py config-set --username <用户名>   # 密码交互输入
   python scripts/vin17_epc.py oe --oe 31110-RAA-A01 --json     # 互换OE/品牌件/车型(三步链)
   ```
-  凭据解析顺序：环境变量 `17VIN_USERNAME`/`17VIN_PASSWORD` → 配置 `vin17` 段（与睿锋共用 config.json）。
-  **不在分发的 skill 里硬编码账号。** 确保 `no_proxy` 包含 `api.17vin.com`。
-- **CLI 工具（可选，仅重流程需要）：** `cli-anything-platform-service` 仅用于
-  泰安联浏览器搜索(`oe-query`/`taianlian-search`，CDP)、报价匹配(`quote match`)等。
-  ```bash
-  pip install -e /path/to/cli-anything-platform-service[data-clean]
-  ```
-- **Chrome CDP：** 仅泰安联 TecDoc 搜索需要 Chrome 调试端口 9250（17vin 已改为自包含 HTTP，不再需要）
+  确保 `no_proxy` 包含 `api.17vin.com`。
+
+凭据统一存 `~/.cli-anything-platform-service/config.json`（`0o600`，与 RayForm-CLI / 内部版共用，token 互通），**不在分发的 skill 里硬编码账号**；环境变量（`PLATFORM_*` / `17VIN_*`）始终可临时覆盖。
+
+- **CLI 工具（可选，仅重流程需要）：** `cli-anything-platform-service` 仅用于泰安联浏览器搜索(`taianlian-search`，CDP)、报价匹配(`quote match`)等。`pip install -e /path/to/cli-anything-platform-service[data-clean]`
+- **Chrome CDP：** 仅泰安联 TecDoc 搜索需要调试端口 9250（17vin 已改自包含 HTTP，不再需要）。
 
 ---
 
 ## Plan → Execute → Verify 框架
 
-Agent 执行数据治理任务时，严格遵循以下循环：
+Agent 执行客户询价任务时，严格遵循以下循环：
 
 ```
 用户输入 → PLAN（识别+匹配工作流） → EXECUTE（按工作流执行） → VERIFY（校验结果）
@@ -109,7 +103,6 @@ Agent 执行数据治理任务时，严格遵循以下循环：
 | OE/关联编号 | `31110-RAA-A01` | [oe-lookup](workflows/oe-lookup.md) |
 | 车型+配件名 | `本田雅阁2.4L 涨紧轮` | [oe-lookup](workflows/oe-lookup.md) |
 | 客户报价单 (Excel) | `报价单.xlsx` | [quote-match](workflows/quote-match.md) |
-| 待校验产品清单 (Excel) | `产品清单.xlsx` | cross-validate（CLI 直接调用） |
 | 纯文本编号列表 | `DAC39720037, 45840045` | 按行拆分为多个 oe-lookup |
 | **图片**（轴承钢印照/包装盒/报价单截图等） | `bearing.jpg` / `quote.png` | **先经「图片输入预处理」读出编号/OE，再按识别结果路由到上表对应工作流** |
 
@@ -151,8 +144,7 @@ Agent 执行数据治理任务时，严格遵循以下循环：
 |--------|------|---------|
 | **OE 查询** | [workflows/oe-lookup.md](workflows/oe-lookup.md) | 单个 OE/工厂编号/尺寸/车型 → 多源查询+校验 |
 | **报价匹配** | [workflows/quote-match.md](workflows/quote-match.md) | 客户报价清单 → 批量报价+三方补查 → 4-sheet Excel |
-| 批量交叉验证 | 待迁移（当前用 CLI 直接调用） | `data-clean cross-validate --file <Excel>` |
-| 车型行话翻译 | 待迁移 | `references/chinese-vehicle-slang-engine-translation.md` |
+| 车型行话翻译 | 参考库 | `references/chinese-vehicle-slang-engine-translation.md` |
 
 ---
 
@@ -207,6 +199,17 @@ AI 训练知识在 OE 匹配中存在根本性错误（配件类型错误、发�
 
 凡查询命中睿锋后台产品，输出必须带 **售价（salePrice）**，走 **`/inventory/list`**（`keyword`=编号/OE + `queryType=ENCODE`，取 `data.content[].salePrice`）。统一用 `scripts/product_price_query.py --keyword <编号/OE>` 查询。oe-lookup 与 quote-match 均只补这一个售价列。价格为空显示 `—`，不阻断流程。
 
+### 12. 睿锋后台多产品优先级排序
+
+当睿锋后台查询返回多个产品时，按以下优先级排序展示：
+
+1. **status=1** 的产品排在前面（status 非 1 的排后面）
+2. 同一 status 内，按 **targetPndSource**（数组）排序：**空数组（直接 OE 匹配）> 含 1 > 含 2（无1）> 仅含 0**
+
+即最终排序：status=1 + targetPndSource 空 → status=1 + 含 1 → status=1 + 含 2 → status=1 + 仅 0 → 非1 + 空 → …
+
+Agent 展示多个产品时遵循此顺序，最优匹配的产品排在最前面。
+
 ---
 
 ## 数据源优先级
@@ -244,14 +247,14 @@ Agent 执行任何需要泰安联 TecDoc 的操作前，需确认 CDP 连接和�
 
 ## 置信度体系
 
-所有工作流统一使用四级置信度：
+所有工作流统一使用四级置信度（面向**对客报价**，非回写）：
 
-| 等级 | 标签 | 条件 | 可执行操作 |
+| 等级 | 标签 | 条件 | 报价建议 |
 |------|------|------|-----------|
-| **A** | 确认 | 泰安联+17vin+后台三者一致 | 可直接回写 |
-| **B** | 待补充 | 两源一致，后台无记录 | 可回写，建议人工扫一眼 |
-| **C** | 待确认 | 仅单源命中或源间不一致 | 必须人工确认后回写 |
-| **D** | 兜底 | 全部未命中 | 需工厂提供 |
+| **A** | 确认 | 泰安联+17vin+后台三者一致 | 可直接对客报价 |
+| **B** | 较可信 | 两源一致 | 可报价，建议内部复核一眼 |
+| **C** | 待确认 | 仅单源命中或源间不一致 | 报价须注明"待确认"，建议工厂核实后再正式发出 |
+| **D** | 兜底 | 全部未命中 | 暂无法报价，需工厂提供 |
 
 ---
 
@@ -269,7 +272,7 @@ Agent 执行任何需要泰安联 TecDoc 的操作前，需确认 CDP 连接和�
 
 ## CLI 命令速查
 
-数据治理相关命令（由 `cli-anything-platform-service` 提供）：
+客户询价用到的命令（由 `cli-anything-platform-service` 提供；**均为只读查询，不含回写**）：
 
 | 操作 | 命令 |
 |------|------|
@@ -279,12 +282,10 @@ Agent 执行任何需要泰安联 TecDoc 的操作前，需确认 CDP 连接和�
 | 后台产品详情 | `data-clean backend-detail --product-id <ID>` |
 | 17vin EPC 查询 | `data-clean epc-query --keyword <车型>` |
 | 泰安联搜索 | `data-clean taianlian-search --query <编号>` |
-| OE 交叉验证 | `data-clean cross-validate --file <Excel>` |
 | 报价匹配 | `data-clean quote match --file <客户表>` |
-| 写入关联编号 | `data-clean num-save --product-id <ID> --num <OE>` |
-| 批量写入编号 | `data-clean num-batch-save --product-id <ID> --nums "列表"` |
-| 写入参数 | `data-clean param-save --product-id <ID> --name <名> --value <值>` |
 | 售价查询(salePrice) | `python scripts/product_price_query.py --keyword <编号/OE> --json` |
+
+> 回写类命令（写关联编号 / 写参数 / 批量交叉验证）属内部版职责，客户版**不提供、不调用**。
 
 ### 自包含命令（无需 CLI，`scripts/ruifeng_platform.py`）
 
