@@ -121,7 +121,7 @@ python scripts/product_price_query.py --keyword <编号/OE> --json
 
 | Sheet | 内容 | 说明 |
 |-------|------|------|
-| **报价结果** | querySource∈{1,2,3,4,6,7} 且不重复的命中行 | 含 productId/名称/雷迪克code/售价/置信度 |
+| **报价结果** | querySource∈{1,2,3,4,6,7} 且不重复的命中行 | 含 productId/名称/雷迪克code/售价 |
 | **待技术员分辨** | querySource=5 或同一编号命中多行 | 相邻排列候选行，附库存数供比对 |
 | **三方补查待写入** | --deep 模式下新 OE 回查命中 | 新OE/来源/原始输入编号，供后续写入任务 |
 | **待工厂确认** | 全部未命中 / CDP 不可达时的降级行 | 仍无法匹配的编号/车型 |
@@ -130,7 +130,7 @@ python scripts/product_price_query.py --keyword <编号/OE> --json
 
 本链路**不调用** `num-save`/`param-save`/`priceAudit`。所有结果落地为 Excel 供人工确认。待技术员分辨、三方补查待写入、待工厂确认三类 sheet 经用户确认后，再单独派发写入任务。
 
-### 置信度标识
+### 置信度标识（内部 Excel 列用，Agent 输出时不要显示置信度行）
 
 | 标识 | 条件 |
 |------|------|
