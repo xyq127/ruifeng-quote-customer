@@ -322,6 +322,27 @@ def query_search(client: RuifengClient, keyword: str, query_type="ENCODE",
     return data.get("content", data.get("records", []))
 
 
+
+def query_product_images(client: RuifengClient, product_id: str) -> list:
+    """查询产品主图记录，仅返回 mainImage=1 且 imageType=1 的原图。"""
+    resp = client.get(
+        "/api/productImage/list",
+        params={"productId": product_id},
+    )
+    data = resp.get("data", [])
+    if isinstance(data, dict):
+        data = data.get("content", data.get("records", []))
+    if not isinstance(data, list):
+        return []
+    return [
+        image
+        for image in data
+        if isinstance(image, dict)
+        and image.get("mainImage") == 1
+        and image.get("imageType") == 1
+        and image.get("imageUrl")
+    ]
+
 def query_sale_price(client: RuifengClient, keyword: str, product_id=None,
                      query_type="ENCODE") -> dict:
     """查询售价 salePrice（客户版，走 /inventory/list，keyword+queryType 检索）。
